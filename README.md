@@ -23,14 +23,7 @@ make install  # copies to /usr/bin/vic
 Requirements: a C99 compiler, POSIX.1-2008, a Linux terminal. No external
 libraries.
 
-Optional sanitiser builds:
-
-```sh
-make vic-asan    # AddressSanitizer
-make vic-ubsan   # UndefinedBehaviorSanitizer
-```
-
-## Usage
+# Usage
 
 ```sh
 vic file           # open file for editing
