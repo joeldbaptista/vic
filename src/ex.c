@@ -703,8 +703,11 @@ colon_do_read(struct editor *g, const struct colon_state *cs)
 	char *fn = g->current_filename;
 	char *q;
 
-	if (cs->args[0] == '!') {
-		colon_do_read_cmd(g, cs->e, cs->got, skip_whitespace(cs->args + 1));
+	if (cs->args[0] == '!' || cs->useforce) {
+		const char *shell_cmd = cs->args[0] == '!'
+		    ? skip_whitespace(cs->args + 1)
+		    : cs->args;
+		colon_do_read_cmd(g, cs->e, cs->got, shell_cmd);
 		return;
 	}
 
