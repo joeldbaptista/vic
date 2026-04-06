@@ -13,6 +13,13 @@ perceptible lag. For the actual use cases of `vic` — source files,
 configuration files, prose — the array is fast enough, and the complexity
 that a fancier structure would introduce is not justified.
 
+## Background
+
+`vic` is the 3rd iteration producing a text editor based on suckless development
+principles. The main difference between `vic` and the previous two iterations 
+(`eek` and `wee`) is the adoption of the "MONRAS" parsing model
+(check: `src/parser.h`), that is the base for the normal mode parser.
+
 ## Build
 
 ```sh
