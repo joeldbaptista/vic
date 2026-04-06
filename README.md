@@ -239,8 +239,6 @@ tmux split-window -h
 - LSP or IDE integration.
 - GUI.
 
-See [NOT_SUPPORTED.md](NOT_SUPPORTED.md) for the full list.
-
 ## Testing
 
 ```sh
