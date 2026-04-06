@@ -126,6 +126,7 @@ Languages and extensions:
 | C++ | `.cc` `.cpp` `.cxx` `.hh` `.hpp` `.hxx` `.inl` |
 | Shell | `.sh` `.bash` `.zsh` `.ksh` |
 | Markdown | `.md` `.markdown` `.mkd` `.mdwn` `.mdown` |
+| SQL | `.sql` |
 
 ## Design
 
