@@ -33,7 +33,7 @@ check-ubsan-pty: vic-ubsan
 check-sanitizers-pty: check-asan-pty check-ubsan-pty
 
 frmt:
-	clang-format -i src/*.c src/*.h
+	clang-format -i src/*.c src/*.h tools/*.c
 
 index:
 	grep -n -E '^[a-zA-Z][a-zA-Z0-9_]+\(' src/*.c > functions.idx

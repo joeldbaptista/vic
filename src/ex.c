@@ -1124,7 +1124,7 @@ static const struct colon_entry colon_cmds[] = {
     {"quit", 1, colon_do_quit},
     {"read", 1, colon_do_read},
     {"rewind", 3, colon_do_rewind}, /* 'rew' to avoid clash with 'r'/'re'=read */
-    {"run", 2, colon_do_run},        /* 'ru' to avoid clash with 'r'=read */
+    {"run", 2, colon_do_run},       /* 'ru' to avoid clash with 'r'=read */
     {"set", 2, colon_do_set},       /* 'se' to avoid clash with 's'=substitute */
     {"substitute", 1, colon_do_substitute},
     {"version", 2, colon_do_version}, /* 've' to avoid clash with 'v'=vglobal */

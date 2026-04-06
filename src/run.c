@@ -81,7 +81,8 @@ run_upper(struct editor *g, int argc, char *argv[],
 	int len = (int)(re - rs + 1);
 	char *p;
 
-	(void)argc; (void)argv;
+	(void)argc;
+	(void)argv;
 	undo_push(g, rs, (unsigned)len, UNDO_SWAP);
 	for (p = rs; p <= re; p++)
 		*p = (char)toupper((unsigned char)*p);
@@ -94,7 +95,8 @@ run_lower(struct editor *g, int argc, char *argv[],
 	int len = (int)(re - rs + 1);
 	char *p;
 
-	(void)argc; (void)argv;
+	(void)argc;
+	(void)argv;
 	undo_push(g, rs, (unsigned)len, UNDO_SWAP);
 	for (p = rs; p <= re; p++)
 		*p = (char)tolower((unsigned char)*p);
@@ -111,7 +113,8 @@ run_trim(struct editor *g, int argc, char *argv[],
 	char *p, *out;
 	int new_len;
 
-	(void)argc; (void)argv;
+	(void)argc;
+	(void)argv;
 	if (!new_buf)
 		return;
 
@@ -153,7 +156,8 @@ run_uniq(struct editor *g, int argc, char *argv[],
 	int prev_len = 0;
 	int new_len;
 
-	(void)argc; (void)argv;
+	(void)argc;
+	(void)argv;
 	if (!new_buf)
 		return;
 
@@ -334,7 +338,8 @@ run_number(struct editor *g, int argc, char *argv[],
 	char *p, *out;
 	int lineno = 1, new_len;
 
-	(void)argc; (void)argv;
+	(void)argc;
+	(void)argv;
 	if (!new_buf)
 		return;
 
@@ -514,7 +519,8 @@ run_urlencode(struct editor *g, int argc, char *argv[],
 	int new_len;
 	static const char hex[] = "0123456789ABCDEF";
 
-	(void)argc; (void)argv;
+	(void)argc;
+	(void)argv;
 	if (!new_buf)
 		return;
 	out = new_buf;
@@ -536,9 +542,12 @@ run_urlencode(struct editor *g, int argc, char *argv[],
 static int
 hex_val(unsigned char c)
 {
-	if (c >= '0' && c <= '9') return c - '0';
-	if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-	if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+	if (c >= '0' && c <= '9')
+		return c - '0';
+	if (c >= 'a' && c <= 'f')
+		return c - 'a' + 10;
+	if (c >= 'A' && c <= 'F')
+		return c - 'A' + 10;
 	return -1;
 }
 
@@ -551,7 +560,8 @@ run_urldecode(struct editor *g, int argc, char *argv[],
 	char *p, *out;
 	int new_len;
 
-	(void)argc; (void)argv;
+	(void)argc;
+	(void)argv;
 	if (!new_buf)
 		return;
 	out = new_buf;
@@ -594,7 +604,8 @@ run_base64enc(struct editor *g, int argc, char *argv[],
 	char *out;
 	int new_len, col = 0;
 
-	(void)argc; (void)argv;
+	(void)argc;
+	(void)argv;
 	if (!new_buf)
 		return;
 	out = new_buf;
@@ -602,8 +613,8 @@ run_base64enc(struct editor *g, int argc, char *argv[],
 		unsigned int b0 = *p++;
 		unsigned int b1 = (p < end) ? *p++ : 0;
 		unsigned int b2 = (p < end) ? *p++ : 0;
-		int take = (int)(p - (unsigned char *)rs) <= range_len ? 3 :
-		           (p - 1 < end) ? 2 : 1;
+		int take = (int)(p - (unsigned char *)rs) <= range_len ? 3 : (p - 1 < end) ? 2
+		                                                                           : 1;
 		unsigned int v = (b0 << 16) | (b1 << 8) | b2;
 
 		*out++ = b64_table[(v >> 18) & 0x3f];
@@ -626,11 +637,16 @@ run_base64enc(struct editor *g, int argc, char *argv[],
 static int
 b64_val(unsigned char c)
 {
-	if (c >= 'A' && c <= 'Z') return c - 'A';
-	if (c >= 'a' && c <= 'z') return c - 'a' + 26;
-	if (c >= '0' && c <= '9') return c - '0' + 52;
-	if (c == '+') return 62;
-	if (c == '/') return 63;
+	if (c >= 'A' && c <= 'Z')
+		return c - 'A';
+	if (c >= 'a' && c <= 'z')
+		return c - 'a' + 26;
+	if (c >= '0' && c <= '9')
+		return c - '0' + 52;
+	if (c == '+')
+		return 62;
+	if (c == '/')
+		return 63;
 	return -1;
 }
 
@@ -643,7 +659,8 @@ run_base64dec(struct editor *g, int argc, char *argv[],
 	char *p, *out;
 	int new_len;
 
-	(void)argc; (void)argv;
+	(void)argc;
+	(void)argv;
 	if (!new_buf)
 		return;
 	out = new_buf;
@@ -652,19 +669,22 @@ run_base64dec(struct editor *g, int argc, char *argv[],
 		int v[4], i, n = 0;
 		unsigned int bits;
 
-		for (i = 0; i < 4 && p <= re; ) {
+		for (i = 0; i < 4 && p <= re;) {
 			unsigned char c = (unsigned char)*p++;
 			if (c == '\n' || c == '\r' || c == ' ')
 				continue;
 			v[i++] = (c == '=') ? 0 : b64_val(c);
 			n++;
 		}
-		if (n < 2) break;
+		if (n < 2)
+			break;
 		bits = ((unsigned)v[0] << 18) | ((unsigned)v[1] << 12) |
-		       ((unsigned)v[2] << 6)  |  (unsigned)v[3];
+		       ((unsigned)v[2] << 6) | (unsigned)v[3];
 		*out++ = (char)((bits >> 16) & 0xff);
-		if (n >= 3) *out++ = (char)((bits >> 8) & 0xff);
-		if (n >= 4) *out++ = (char)(bits & 0xff);
+		if (n >= 3)
+			*out++ = (char)((bits >> 8) & 0xff);
+		if (n >= 4)
+			*out++ = (char)(bits & 0xff);
 	}
 	new_len = (int)(out - new_buf);
 	raw_replace(g, rs, re, new_buf, new_len);
@@ -682,20 +702,42 @@ run_jsonesc(struct editor *g, int argc, char *argv[],
 	char *p, *out;
 	int new_len;
 
-	(void)argc; (void)argv;
+	(void)argc;
+	(void)argv;
 	if (!new_buf)
 		return;
 	out = new_buf;
 	for (p = rs; p <= re; p++) {
 		unsigned char c = (unsigned char)*p;
 		switch (c) {
-		case '"':  *out++ = '\\'; *out++ = '"';  break;
-		case '\\': *out++ = '\\'; *out++ = '\\'; break;
-		case '\n': *out++ = '\\'; *out++ = 'n';  break;
-		case '\r': *out++ = '\\'; *out++ = 'r';  break;
-		case '\t': *out++ = '\\'; *out++ = 't';  break;
-		case '\b': *out++ = '\\'; *out++ = 'b';  break;
-		case '\f': *out++ = '\\'; *out++ = 'f';  break;
+		case '"':
+			*out++ = '\\';
+			*out++ = '"';
+			break;
+		case '\\':
+			*out++ = '\\';
+			*out++ = '\\';
+			break;
+		case '\n':
+			*out++ = '\\';
+			*out++ = 'n';
+			break;
+		case '\r':
+			*out++ = '\\';
+			*out++ = 'r';
+			break;
+		case '\t':
+			*out++ = '\\';
+			*out++ = 't';
+			break;
+		case '\b':
+			*out++ = '\\';
+			*out++ = 'b';
+			break;
+		case '\f':
+			*out++ = '\\';
+			*out++ = 'f';
+			break;
 		default:
 			if (c < 0x20) {
 				out += sprintf(out, "\\u%04x", c);
@@ -718,7 +760,8 @@ run_jsonunesc(struct editor *g, int argc, char *argv[],
 	char *p, *out;
 	int new_len;
 
-	(void)argc; (void)argv;
+	(void)argc;
+	(void)argv;
 	if (!new_buf)
 		return;
 	out = new_buf;
@@ -727,14 +770,38 @@ run_jsonunesc(struct editor *g, int argc, char *argv[],
 		if (*p == '\\' && p + 1 <= re) {
 			p++;
 			switch (*p) {
-			case '"':  *out++ = '"';  p++; break;
-			case '\\': *out++ = '\\'; p++; break;
-			case '/':  *out++ = '/';  p++; break;
-			case 'n':  *out++ = '\n'; p++; break;
-			case 'r':  *out++ = '\r'; p++; break;
-			case 't':  *out++ = '\t'; p++; break;
-			case 'b':  *out++ = '\b'; p++; break;
-			case 'f':  *out++ = '\f'; p++; break;
+			case '"':
+				*out++ = '"';
+				p++;
+				break;
+			case '\\':
+				*out++ = '\\';
+				p++;
+				break;
+			case '/':
+				*out++ = '/';
+				p++;
+				break;
+			case 'n':
+				*out++ = '\n';
+				p++;
+				break;
+			case 'r':
+				*out++ = '\r';
+				p++;
+				break;
+			case 't':
+				*out++ = '\t';
+				p++;
+				break;
+			case 'b':
+				*out++ = '\b';
+				p++;
+				break;
+			case 'f':
+				*out++ = '\f';
+				p++;
+				break;
 			case 'u':
 				if (p + 4 <= re) {
 					unsigned int cp = 0;
@@ -756,7 +823,9 @@ run_jsonunesc(struct editor *g, int argc, char *argv[],
 						*out++ = (char)(0x80 | (cp & 0x3f));
 					}
 				} else {
-					*out++ = '\\'; *out++ = 'u'; p++;
+					*out++ = '\\';
+					*out++ = 'u';
+					p++;
 				}
 				break;
 			default:
@@ -775,7 +844,7 @@ run_jsonunesc(struct editor *g, int argc, char *argv[],
 /* ---- freq -------------------------------------------------------------- */
 
 #define FREQ_MAX_WORDS 256
-#define FREQ_WORD_LEN  32
+#define FREQ_WORD_LEN 32
 
 struct word_freq {
 	char word[FREQ_WORD_LEN];
@@ -792,7 +861,8 @@ run_freq(struct editor *g, int argc, char *argv[],
 	char status[STATUS_BUFFER_LEN];
 	int i, j, top, out_len;
 
-	(void)argc; (void)argv;
+	(void)argc;
+	(void)argv;
 	memset(wf, 0, sizeof(wf));
 
 	while (p <= re) {
@@ -856,7 +926,8 @@ run_col(struct editor *g, int argc, char *argv[],
 	int max_col = 0;
 	char *p = rs;
 
-	(void)argc; (void)argv;
+	(void)argc;
+	(void)argv;
 	while (p <= re) {
 		int col = 0;
 
@@ -875,7 +946,7 @@ run_col(struct editor *g, int argc, char *argv[],
 /* ---- hash (FNV-1a) ---------------------------------------------------- */
 
 #define FNV_OFFSET 14695981039346656037UL
-#define FNV_PRIME  1099511628211UL
+#define FNV_PRIME 1099511628211UL
 
 static uint64_t
 fnv1a(const char *s, int len)
@@ -938,7 +1009,7 @@ run_hash(struct editor *g, int argc, char *argv[],
 		         collisions, collisions == 1 ? "" : "s");
 		status_line(g, "%s", status);
 
-	/* hash replace [mod N] — replace each identifier with its hash value */
+		/* hash replace [mod N] — replace each identifier with its hash value */
 	} else if (argc >= 2 && strcmp(argv[1], "replace") == 0) {
 		uint64_t N = 0; /* 0 = no modulo, use raw hash */
 		char *p = rs;
@@ -959,7 +1030,8 @@ run_hash(struct editor *g, int argc, char *argv[],
 					id_len++;
 				}
 				uint64_t h = fnv1a(id, id_len);
-				if (N > 0) h %= N;
+				if (N > 0)
+					h %= N;
 
 				char num[24];
 				int num_len = snprintf(num, sizeof(num),
@@ -982,7 +1054,7 @@ run_hash(struct editor *g, int argc, char *argv[],
 			}
 		}
 
-	/* hash — FNV-1a of entire range, displayed on status bar */
+		/* hash — FNV-1a of entire range, displayed on status bar */
 	} else {
 		int len = (int)(re - rs + 1);
 		uint64_t h = fnv1a(rs, len);
@@ -1002,8 +1074,7 @@ c2s(const char *src, int len, char *dst)
 		unsigned char c = (unsigned char)src[i];
 		if (isupper(c) && i > 0) {
 			unsigned char prev = (unsigned char)src[i - 1];
-			unsigned char next = (i + 1 < len) ?
-			                     (unsigned char)src[i + 1] : 0;
+			unsigned char next = (i + 1 < len) ? (unsigned char)src[i + 1] : 0;
 			if (islower(prev) || (isupper(prev) && islower(next)))
 				dst[n++] = '_';
 		}
@@ -1131,7 +1202,8 @@ run_echo(struct editor *g, int argc, char *argv[],
 	char buf[STATUS_BUFFER_LEN];
 	int n = 0, i;
 
-	(void)rs; (void)re;
+	(void)rs;
+	(void)re;
 	for (i = 1; i < argc; i++) {
 		int len = (int)strlen(argv[i]);
 		if (i > 1 && n < (int)sizeof(buf) - 1)
@@ -1156,7 +1228,8 @@ run_wc(struct editor *g, int argc, char *argv[],
 	int lines = 0, words = 0, bytes = 0, in_word = 0;
 	char *p;
 
-	(void)argc; (void)argv;
+	(void)argc;
+	(void)argv;
 	for (p = rs; p <= re; p++) {
 		unsigned char c = (unsigned char)*p;
 		bytes++;
@@ -1176,27 +1249,27 @@ run_wc(struct editor *g, int argc, char *argv[],
 /* ---- dispatch table ---------------------------------------------------- */
 
 static const struct run_entry run_table[] = {
-    {"echo",      run_echo},
-    {"wc",        run_wc},
-    {"convert",   run_convert},
-    {"upper",     run_upper},
-    {"lower",     run_lower},
-    {"trim",      run_trim},
-    {"uniq",      run_uniq},
-    {"sort",      run_sort},
-    {"wrap",      run_wrap},
-    {"number",    run_number},
-    {"deindent",  run_deindent},
-    {"align",     run_align},
+    {"echo", run_echo},
+    {"wc", run_wc},
+    {"convert", run_convert},
+    {"upper", run_upper},
+    {"lower", run_lower},
+    {"trim", run_trim},
+    {"uniq", run_uniq},
+    {"sort", run_sort},
+    {"wrap", run_wrap},
+    {"number", run_number},
+    {"deindent", run_deindent},
+    {"align", run_align},
     {"urlencode", run_urlencode},
     {"urldecode", run_urldecode},
     {"base64enc", run_base64enc},
     {"base64dec", run_base64dec},
-    {"jsonesc",   run_jsonesc},
+    {"jsonesc", run_jsonesc},
     {"jsonunesc", run_jsonunesc},
-    {"freq",      run_freq},
-    {"col",       run_col},
-    {"hash",      run_hash},
+    {"freq", run_freq},
+    {"col", run_col},
+    {"hash", run_hash},
     {NULL, NULL},
 };
 
