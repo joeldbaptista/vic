@@ -192,6 +192,7 @@ color.c         colorizer registry
 color_c.c       C/C++ colorizer
 color_sh.c      shell colorizer
 color_md.c      Markdown colorizer
+color_sql.c     SQL colorizer
 ```
 
 ## Multiple files and tmux
