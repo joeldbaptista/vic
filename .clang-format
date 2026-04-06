@@ -1,0 +1,24 @@
+BasedOnStyle: LLVM
+
+# Enforce:
+# return-type
+# function-name(params)
+# {
+#     body
+# }
+AlwaysBreakAfterReturnType: AllDefinitions
+
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+  AfterControlStatement: false
+  AfterStruct: false
+  AfterEnum: false
+  AfterUnion: false
+  BeforeElse: false
+  BeforeCatch: false
+  IndentBraces: false
+
+IndentWidth: 8
+UseTab: ForIndentation
+ColumnLimit: 0
