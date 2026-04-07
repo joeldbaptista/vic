@@ -21,6 +21,7 @@
  */
 #include "screen.h"
 #include "color.h"
+#include <regex.h>
 
 #include "codepoint.h"
 #include "line.h"
@@ -187,11 +188,48 @@ scan_line_colors(const struct colorizer *colorizer, char *src, char *end,
 	return len;
 }
 
+/*
+ * scan_line_highlight_attrs - mark bytes that fall inside highlight matches.
+ *
+ * Uses a null-terminated copy of [src, src+len) to drive regexec in a loop.
+ * Sets attrs[i]=1 for each byte inside a match, 0 otherwise.
+ */
+static void
+scan_line_highlight_attrs(const regex_t *re, const char *src, int len,
+                          char *attrs)
+{
+	char buf[VI_MAX_LINE + 1];
+	regmatch_t m;
+	int pos = 0;
+
+	if (len > VI_MAX_LINE)
+		len = VI_MAX_LINE;
+	memcpy(buf, src, (size_t)len);
+	buf[len] = '\0';
+	memset(attrs, 0, (size_t)len);
+
+	while (pos < len) {
+		int flags = pos > 0 ? REG_NOTBOL : 0;
+		if (regexec(re, buf + pos, 1, &m, flags) != 0)
+			break;
+		int start = pos + (int)m.rm_so;
+		int end = pos + (int)m.rm_eo;
+		if (end <= start) {
+			pos = start + 1;
+			continue;
+		}
+		if (end > len)
+			end = len;
+		memset(attrs + start, 1, (size_t)(end - start));
+		pos = end;
+	}
+}
+
 static char *
 format_line(struct editor *g, char *src, int line_no, int cur_line,
             unsigned lnum_width, int text_cols,
             const struct colorizer *colorizer,
-            int *color_state)
+            int *color_state, const regex_t *hl_re)
 {
 	unsigned char c;
 	int co;
@@ -201,6 +239,7 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 	char *vstop = NULL;
 	int vbuftype;
 	int cur_in_visual = 0;
+	int cur_in_hl = 0;
 	int cur_attr = ATTR_NORMAL;
 	int have_visual = visual_get_range(g, &vstart, &vstop, &vbuftype);
 	(void)vbuftype;
@@ -208,6 +247,7 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 	char *dest_end = dest + sizeof(g->scr_out_buf) - 1;
 	char *line_start = src;
 	char line_attrs[VI_MAX_LINE];
+	char hl_attrs[VI_MAX_LINE];
 	int line_len = 0;
 
 	dest = render_lnum(g, dest, src, line_no, cur_line, lnum_width);
@@ -228,6 +268,17 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 			dest += 3;
 		}
 	}
+	if (hl_re) {
+		if (line_len == 0) {
+			const char *p = line_start;
+			while (p < g->end && *p != '\n' && line_len < VI_MAX_LINE) {
+				p++;
+				line_len++;
+			}
+		}
+		if (line_len > 0)
+			scan_line_highlight_attrs(hl_re, line_start, line_len, hl_attrs);
+	}
 
 	co = 0;
 	src = skip_line_to_offset(g, src, ofs, &co);
@@ -237,6 +288,7 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 		char *next;
 		int width;
 		int new_visual;
+		int new_hl;
 		int new_attr;
 		int byte_off;
 
@@ -249,17 +301,27 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 
 		new_visual = (have_visual && src >= vstart && src <= vstop) ? 1 : 0;
 		byte_off = (int)(src - line_start);
+		new_hl = (!new_visual && hl_re && byte_off < line_len &&
+		          hl_attrs[byte_off]) ? 1 : 0;
 		new_attr =
 		    (colorizer && byte_off < line_len) ? line_attrs[byte_off] : ATTR_NORMAL;
 
-		if (new_visual != cur_in_visual || new_attr != cur_attr) {
-			const char *sgr = sgr_table[new_visual][new_attr];
+		if (new_visual != cur_in_visual || new_hl != cur_in_hl ||
+		    new_attr != cur_attr) {
+			const char *sgr;
+			if (new_visual)
+				sgr = sgr_table[1][new_attr];
+			else if (new_hl)
+				sgr = "\033[43m";
+			else
+				sgr = sgr_table[0][new_attr];
 			size_t n = strlen(sgr);
 			if (dest + n <= dest_end) {
 				memcpy(dest, sgr, n);
 				dest += n;
 			}
 			cur_in_visual = new_visual;
+			cur_in_hl = new_hl;
 			cur_attr = new_attr;
 		}
 
@@ -329,7 +391,7 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 	}
 
 	/* Reset any active SGR before padding. */
-	if (cur_in_visual || cur_attr != ATTR_NORMAL || colorizer) {
+	if (cur_in_visual || cur_in_hl || cur_attr != ATTR_NORMAL || colorizer) {
 		if (dest + 3 <= dest_end) {
 			memcpy(dest, "\033[m", 3);
 			dest += 3;
@@ -346,6 +408,17 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 	return g->scr_out_buf;
 }
 
+static int
+highlight_pattern_hash(const char *pat)
+{
+	int h = 5381;
+	if (!pat)
+		return 0;
+	for (; *pat; pat++)
+		h = h * 31 + (unsigned char)*pat;
+	return h;
+}
+
 void
 refresh(struct editor *g, int full_screen)
 {
@@ -358,6 +431,9 @@ refresh(struct editor *g, int full_screen)
 	char *sp;
 	const struct colorizer *colorizer;
 	int color_state;
+	regex_t hl_re;
+	regex_t *hl_rep = NULL;
+	int hl_hash;
 
 	if (!g->get_rowcol_error) {
 		unsigned c = g->columns;
@@ -369,6 +445,10 @@ refresh(struct editor *g, int full_screen)
 	lnum_width = screen_line_number_width(g);
 	text_cols = screen_text_columns_on_screen(g);
 
+	hl_hash = highlight_pattern_hash(g->highlight_pattern);
+	if (hl_hash != g->refresh_last_highlight_hash)
+		full_screen = TRUE;
+
 	if (!full_screen && g->screenbegin == g->refresh_last_screenbegin &&
 	    g->offset == g->scr_old_offset &&
 	    g->modified_count == g->refresh_last_modified_count && g->undo_q == 0 &&
@@ -377,6 +457,15 @@ refresh(struct editor *g, int full_screen)
 		if (!g->keep_index)
 			g->cindex = g->ccol + g->offset;
 		return;
+	}
+
+	/* Compile highlight pattern if one is active. */
+	if (g->highlight_pattern && g->highlight_pattern[0] != '\0') {
+		int cflags = REG_NEWLINE;
+		if (IS_IGNORECASE(g))
+			cflags |= REG_ICASE;
+		if (regcomp(&hl_re, g->highlight_pattern, cflags) == 0)
+			hl_rep = &hl_re;
 	}
 
 	if (lnum_width != 0) {
@@ -409,7 +498,7 @@ refresh(struct editor *g, int full_screen)
 		char *out_buf;
 
 		out_buf = format_line(g, tp, line_no, cur_line, lnum_width, text_cols,
-		                      colorizer, &color_state);
+		                      colorizer, &color_state, hl_rep);
 
 		if (tp < g->end) {
 			char *t = memchr(tp, '\n', g->end - tp);
@@ -429,6 +518,9 @@ refresh(struct editor *g, int full_screen)
 		}
 	}
 
+	if (hl_rep)
+		regfree(&hl_re);
+
 	place_cursor(g, g->crow, g->ccol + (int)lnum_width);
 
 	if (!g->keep_index)
@@ -436,6 +528,7 @@ refresh(struct editor *g, int full_screen)
 
 	g->refresh_last_screenbegin = g->screenbegin;
 	g->refresh_last_modified_count = g->modified_count;
+	g->refresh_last_highlight_hash = hl_hash;
 	g->scr_old_offset = g->offset;
 }
 

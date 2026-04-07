@@ -1246,6 +1246,20 @@ run_wc(struct editor *g, int argc, char *argv[],
 	status_line(g, "%d lines  %d words  %d bytes", lines, words, bytes);
 }
 
+/* ---- highlight --------------------------------------------------------- */
+
+static void
+run_highlight(struct editor *g, int argc, char *argv[],
+              char *rs, char *re)
+{
+	(void)rs;
+	(void)re;
+	free(g->highlight_pattern);
+	g->highlight_pattern = NULL;
+	if (argc >= 2 && argv[1][0] != '\0')
+		g->highlight_pattern = xstrdup(argv[1]);
+}
+
 /* ---- dispatch table ---------------------------------------------------- */
 
 static const struct run_entry run_table[] = {
@@ -1270,6 +1284,7 @@ static const struct run_entry run_table[] = {
     {"freq", run_freq},
     {"col", run_col},
     {"hash", run_hash},
+    {"highlight", run_highlight},
     {NULL, NULL},
 };
 

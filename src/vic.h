@@ -241,6 +241,7 @@ struct editor {
 	int last_status_cksum;
 	char *refresh_last_screenbegin;
 	int refresh_last_modified_count;
+	int refresh_last_highlight_hash; /* hash of highlight_pattern at last render */
 	int line_count_cache;
 	int line_count_cache_stamp;
 
@@ -252,6 +253,9 @@ struct editor {
 	int last_search_char; /* codepoint, not byte */
 	int last_search_cmd;
 	char *last_search_pattern;
+
+	/* --- Highlight --- */
+	char *highlight_pattern; /* pattern set by :run highlight; NULL = none */
 
 	/* --- Insert / autoindent --- */
 	int indent_col; /* column of recent autoindent, or 0 */
