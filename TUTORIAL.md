@@ -457,6 +457,24 @@ my_function     →  (s2c)  myFunction
 my_function     →  (s2uc) MyFunction
 ```
 
+### Highlight
+
+```
+:run highlight pattern  highlight all occurrences of pattern in the viewport
+:run highlight          clear all highlighting
+```
+
+`pattern` is a POSIX BRE regex.  Highlighting is visual-only — it does not
+move the cursor or affect the buffer.  Visual-mode selection takes priority
+over highlight.
+
+Examples:
+```
+:run highlight TODO
+:run highlight [0-9]\+
+:run highlight                  ← clear
+```
+
 ### Debugging / scripting
 
 ```
@@ -547,3 +565,9 @@ set nu
 ```
 :'<,'>run hash
 ```
+
+**Highlight all occurrences of a word without moving the cursor:**
+```
+:run highlight myword
+```
+Clear with `:run highlight`.
