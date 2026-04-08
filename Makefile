@@ -18,17 +18,21 @@ vic-asan: src/vic.c src/utf8.c src/compat.c src/term.c src/input.c src/undo.c sr
 vic-ubsan: src/vic.c src/utf8.c src/compat.c src/term.c src/input.c src/undo.c src/search.c src/screen.c src/motion.c src/operator.c src/editcmd.c src/textobj.c src/range.c src/scan.c src/visual.c src/wordmotion.c src/buffer.c src/session.c src/excore.c src/ex.c src/line.c src/codepoint.c src/context.c src/status.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/run.c src/parser.c
 	$(CC) $(SAN_COMMON) -fsanitize=undefined -o vic-ubsan src/vic.c src/utf8.c src/compat.c src/term.c src/input.c src/undo.c src/search.c src/screen.c src/motion.c src/operator.c src/editcmd.c src/textobj.c src/range.c src/scan.c src/visual.c src/wordmotion.c src/buffer.c src/session.c src/excore.c src/ex.c src/line.c src/codepoint.c src/context.c src/status.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/run.c src/parser.c
 
-check-star-hash-pty: vic
-	python3 tools/check-star-hash-pty.py --vi ./vic
+tools/check-pty: tools/check-pty.c
+	$(CC) -std=c99 -D_POSIX_C_SOURCE=200809L -D_XOPEN_SOURCE=700 \
+	    -Wall -Wextra -O2 -o tools/check-pty tools/check-pty.c
 
-check-regression-pty: vic
-	python3 tools/check-regression-pty.py --vi ./vic
+check-star-hash-pty: vic tools/check-pty
+	./tools/check-pty --vi ./vic --filter star,hash,gstar,ghash
 
-check-asan-pty: vic-asan
-	ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 python3 tools/check-regression-pty.py --vi ./vic-asan
+check-regression-pty: vic tools/check-pty
+	./tools/check-pty --vi ./vic
 
-check-ubsan-pty: vic-ubsan
-	UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 python3 tools/check-regression-pty.py --vi ./vic-ubsan
+check-asan-pty: vic-asan tools/check-pty
+	ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 ./tools/check-pty --vi ./vic-asan
+
+check-ubsan-pty: vic-ubsan tools/check-pty
+	UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 ./tools/check-pty --vi ./vic-ubsan
 
 check-sanitizers-pty: check-asan-pty check-ubsan-pty
 
@@ -42,5 +46,10 @@ install: clean vic
 	mv vic /usr/bin/vic
 	chmod a+x /usr/bin/vic
 
+deploy:
+	rsync -av --include='src/***' --include='data/***' --include='tools/***' \
+	    --include='Makefile' --exclude='*' ./ w01:~/vic/
+	ssh w01 "cd ~/vic && make"
+
 clean:
-	rm -f vic vic-asan vic-ubsan
+	rm -f vic vic-asan vic-ubsan tools/check-pty
