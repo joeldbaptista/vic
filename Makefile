@@ -49,7 +49,7 @@ install: clean vic
 deploy:
 	rsync -av --include='src/***' --include='data/***' --include='tools/***' \
 	    --include='Makefile' --exclude='*' ./ w01:~/vic/
-	ssh w01 "cd ~/vic && make"
+	ssh w01 "cd ~/vic && make clean && make"
 
 clean:
 	rm -f vic vic-asan vic-ubsan tools/check-pty
