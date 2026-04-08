@@ -19,7 +19,6 @@
  * Search wraps at buffer boundaries and reports "not found" via
  * indicate_error and status_line_bold.
  */
-#define _GNU_SOURCE
 #include "search.h"
 
 #include "codepoint.h"
@@ -84,53 +83,73 @@ char *
 char_search(struct editor *g, char *p, const char *pat,
             int dir_and_range)
 {
-	struct re_pattern_buffer preg;
-	const char *err;
-	char *q;
-	int i;
-	int size;
-	int range;
-	int start;
+	regex_t preg;
+	regmatch_t m;
+	int flags;
+	int full;
+	char *region_start;
+	char *region_end;
+	char *line;
+	char *eol;
+	char *seg_end;
+	char *result = NULL;
+	char *cur;
+	char save;
 
-	re_syntax_options = RE_SYNTAX_POSIX_BASIC & (~RE_DOT_NEWLINE);
+	flags = REG_EXTENDED | REG_NEWLINE;
 	if (g->setops & VI_IGNORECASE)
-		re_syntax_options |= RE_ICASE;
-
-	memset(&preg, 0, sizeof(preg));
-	err = re_compile_pattern(pat, strlen(pat), &preg);
-	preg.not_bol = p != g->text;
-	preg.not_eol = p != g->end - 1;
-	if (err != NULL) {
-		status_line_bold(g, "bad search pattern '%s': %s", pat, err);
+		flags |= REG_ICASE;
+	if (regcomp(&preg, pat, flags) != 0) {
+		status_line_bold(g, "bad search pattern '%s'", pat);
 		return p;
 	}
 
-	range = (dir_and_range & 1);
-	q = g->end - 1;
-	if (range == 0)
-		q = next_line(g, p);
-	if (dir_and_range < 0) {
-		q = g->text;
-		if (range == 0)
-			q = prev_line(g, p);
-	}
+	full = dir_and_range & 1;
 
-	range = q - p;
-	if (range < 0) {
-		size = -range;
-		start = size;
+	if (dir_and_range > 0) {
+		/* Forward: find first match at or after p. */
+		region_end = full ? g->end - 1 : next_line(g, p);
+		for (line = p; line < region_end; line = next_line(g, eol)) {
+			int eflags = 0;
+
+			eol = end_line(g, line);
+			if (eol > region_end)
+				eol = region_end;
+			save = *eol;
+			*eol = '\0';
+			if (line != g->text && line[-1] != '\n')
+				eflags = REG_NOTBOL;
+			if (regexec(&preg, line, 1, &m, eflags) == 0) {
+				result = line + m.rm_so;
+				*eol = save;
+				break;
+			}
+			*eol = save;
+		}
 	} else {
-		size = range;
-		start = 0;
+		/* Backward: find last match before p. */
+		region_start = full ? g->text : prev_line(g, p);
+		for (line = region_start; line < p; line = next_line(g, eol)) {
+			eol = end_line(g, line);
+			seg_end = eol < p ? eol : p;
+			save = *seg_end;
+			*seg_end = '\0';
+			if (regexec(&preg, line, 1, &m, 0) == 0) {
+				/* Walk forward within segment; keep last match. */
+				cur = line;
+				do {
+					result = cur + m.rm_so;
+					cur = result +
+					    (m.rm_eo > m.rm_so ? m.rm_eo - m.rm_so : 1);
+				} while (cur < seg_end &&
+				         regexec(&preg, cur, 1, &m, REG_NOTBOL) == 0);
+			}
+			*seg_end = save;
+		}
 	}
-	q = p - start;
-	if (q < g->text)
-		q = g->text;
 
-	i = re_search(&preg, q, size, start, range, NULL);
 	regfree(&preg);
-
-	return i < 0 ? NULL : q + i;
+	return result;
 }
 
 static char *

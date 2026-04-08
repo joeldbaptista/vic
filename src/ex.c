@@ -220,10 +220,17 @@ regex_search(struct editor *g, char *q, regex_t *preg,
 	const char *t;
 	char *r;
 
-	regmatch[0].rm_so = 0;
-	regmatch[0].rm_eo = end_line(g, q) - q;
-	if (regexec(preg, q, MAX_SUBPATTERN, regmatch, REG_STARTEND) != 0)
-		return found;
+	{
+		char *eol = end_line(g, q);
+		char sv = *eol;
+		int rc;
+
+		*eol = '\0';
+		rc = regexec(preg, q, MAX_SUBPATTERN, regmatch, 0);
+		*eol = sv;
+		if (rc != 0)
+			return found;
+	}
 
 	found = q + regmatch[0].rm_so;
 	*len_F = (size_t)(regmatch[0].rm_eo - regmatch[0].rm_so);
@@ -345,9 +352,13 @@ global(struct editor *g, char *p, int invert, int b, int e,
 		regmatch_t m;
 		int matched;
 
-		m.rm_so = 0;
-		m.rm_eo = (regoff_t)(eol - line);
-		matched = (regexec(&preg, line, 1, &m, REG_STARTEND) == 0);
+		{
+			char sv = *eol;
+
+			*eol = '\0';
+			matched = (regexec(&preg, line, 1, &m, 0) == 0);
+			*eol = sv;
+		}
 
 		if (matched != invert) {
 			if (nmatches == cap) {
