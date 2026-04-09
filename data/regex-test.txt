@@ -1,0 +1,46 @@
+regex search test file — open with: vic data/regex-test.txt
+vic uses POSIX ERE syntax (same as grep -E).
+
+--- literal ---
+hello world
+foobar food foo
+mississippi
+
+--- dot (any char) ---
+cat bat hat mat
+
+--- character class ---
+Hello HELLO hello hElLo
+
+--- anchors ---
+start of line
+end of line
+startswith
+endswith
+
+--- ERE quantifiers ---
+color
+colour
+go goo gooo
+ab aab aaab
+
+--- ERE alternation ---
+the cat sat
+the dog sat
+the bird flew
+
+--- word boundaries (\< \>) ---
+foo foobar barfoo
+bar barrel rebar
+
+--- suggested searches (Normal mode) ---
+/hello               literal
+/[Hh]ello            case-insensitive via class
+/.at                 dot: cat, bat, hat, mat
+/^start              line anchor
+/end$                line anchor
+/go+                 one or more o (ERE +): lands on "go" (not "g")
+/colou?r             optional u (ERE ?): lands on "color" then "colour" with n
+/cat|dog             alternation (ERE |)
+/\<foo\>             whole word foo (not foobar)
+/\<bar\>             whole word bar (not barrel)
