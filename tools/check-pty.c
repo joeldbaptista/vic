@@ -801,7 +801,10 @@ static const struct tc cases[] = {
 	TC("undo-x",  "xu:write\r",     "hello\n",    "hello\n"),
 	TC("undo-dd", "ddu:write\r",    "one\ntwo\n", "one\ntwo\n"),
 	TC("redo-x",  "xu\x12:write\r", "hello\n",    "ello\n"),
-	/* search */
+	/* search — ERE quantifier: ? matches zero or one */
+	TC("search-ere-optional", "/ab?c\rx:write\r", "ab\nabc\n", "ab\nbc\n"),
+	/* search — ERE quantifier: + matches one or more */
+	TC("search-ere-plus",     "/go+\rx:write\r",  "g\ngo\ngoo\n", "g\no\ngoo\n"),
 	TC("search-forward",  "/bar\rx:write\r",    "foo\nbar\nbaz\n",     "foo\nar\nbaz\n"),
 	TC("search-backward", "G?foo\rx:write\r",   "foo\nbar\nfoo\n",     "oo\nbar\nfoo\n"),
 	TC("search-n-repeat", "/bar\rnx:write\r",   "foo\nbar\nbaz\nbar\n","foo\nbar\nbaz\nar\n"),
