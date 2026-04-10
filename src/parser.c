@@ -22,22 +22,20 @@ match_op2(const struct parser *s, int c)
 	    {'g', "g*#", 0},
 	    {'z', "ztb.-", 1},
 	    {'Z', "ZQ", 0},
-	    {'\0', "", 0}, /* signal */
+	    {'\0', "", 0}, /* signal end */
 	};
 
-	if (c == '\0')
-		return 0;
-
-	for (r = rules; r->op != '\0'; ++r) {
-		if (r->op != s->op)
-			continue;
-		if (strchr(r->set, c) != NULL)
-			return 1;
-		if (r->nl_ok && (c == '\r' || c == '\n'))
-			return 1;
-		return 0;
+	if (c) {
+		for (r = rules; r->op != '\0'; ++r) {
+			if (r->op != s->op)
+				continue;
+			if (strchr(r->set, c) != NULL)
+				return 1;
+			if (r->nl_ok && (c == '\r' || c == '\n'))
+				return 1;
+			return 0;
+		}
 	}
-
 	return 0;
 }
 
@@ -162,7 +160,11 @@ parse(struct parser *s, int c)
 			s->stg = STG_RANGE;
 			continue;
 		case STG_RANGE:
-			if (in_set(c, "wbedyc<>")) { /* anchor-less ranges */
+			if (in_set(c, "wWeEbBdyc<>"   /* characterwise */
+			              "^$%0hnN|{} l" /* more characterwise (incl. space, l) */
+			              "\x08\x7f"     /* BS, DEL */
+			              "GHL+-jk\r\n" /* linewise */
+			              )) { /* anchor-less ranges */
 				s->rg = (char)c;
 				s->ok = 1;
 				return 1;
