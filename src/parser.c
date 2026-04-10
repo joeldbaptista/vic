@@ -7,28 +7,30 @@
  */
 #include "parser.h"
 
+/* composite keys; e.g. `gg`, `g*`, etc */
 struct op2_rule {
-	char op;
-	const char *set;
-	int nl_ok;
+	char op; /* prefix */
+	const char *set; /* follow up */
+	int nl_ok; /* is enter accepted? */
 };
 
 static int
 match_op2(const struct parser *s, int c)
 {
+	const struct op2_rule *r;
 	static const struct op2_rule rules[] = {
 	    {'g', "g*#", 0},
 	    {'z', "ztb.-", 1},
 	    {'Z', "ZQ", 0},
-	    {'\0', "", 0},
+	    {'\0', "", 0}, /* signal */
 	};
-	const struct op2_rule *r;
+
+	if (c == '\0')
+		return 0;
 
 	for (r = rules; r->op != '\0'; ++r) {
 		if (r->op != s->op)
 			continue;
-		if (c == '\0')
-			return 0;
 		if (strchr(r->set, c) != NULL)
 			return 1;
 		if (r->nl_ok && (c == '\r' || c == '\n'))
