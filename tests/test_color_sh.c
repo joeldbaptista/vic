@@ -99,6 +99,8 @@ test_double_quoted(void)
     st = CHECK_COLOR(SH, 0, "\"${X}\"",         "SPPPPS");   CHECK(st == 0);
     /* backslash escape inside (6 chars: " a \ n b ") */
     st = CHECK_COLOR(SH, 0, "\"a\\nb\"",        "SSSSSS");  CHECK(st == 0);
+    /* escaped quote at end of line — the \" must be colored STRING, not NORMAL */
+    st = CHECK_COLOR(SH, 0, "\"a\\\"",          "SSSS");    CHECK(st == 1);
 }
 
 static void
