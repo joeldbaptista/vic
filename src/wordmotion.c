@@ -10,9 +10,6 @@
  * scan type (S_BEFORE_WS, S_TO_WS, S_OVER_WS, S_END_ALNUM, S_END_PUNCT).
  * WORD variants skip punctuation by treating any non-whitespace run as
  * one token (S_BEFORE_WS / S_OVER_WS only).
- *
- * No hooks: cp_next/cp_prev from codepoint.h and skip_thing from scan.h
- * are called directly.
  */
 #include "wordmotion.h"
 
@@ -50,6 +47,17 @@ is_ascii_punct(unsigned char c)
 void
 run_word_forward_cmd(struct editor *g)
 {
+	/*
+	 * == Move to the start of the next word (w) ==
+	 *
+	 * Skip to the end of the current alnum/punct run, step one codepoint
+	 * past it, then skip any whitespace to land on the first character of
+	 * the next word.  Handles the distinct case where dot starts on
+	 * punctuation vs. an alphanumeric/underscore run.
+	 *
+	 * - Kept separate from run_word_dir_cmd because the step-then-skip
+	 *   order differs from b and e.
+	 */
 	do {
 		if (is_word_byte((unsigned char)*g->dot)) {
 			g->dot = skip_thing(g, g->dot, 1, FORWARD, S_END_ALNUM);
@@ -67,6 +75,18 @@ run_word_forward_cmd(struct editor *g)
 static void
 run_word_dir_cmd(struct editor *g, int dir, int end_mode)
 {
+	/*
+	 * == Shared implementation for b (backward) and e (end) ==
+	 *
+	 * Steps one codepoint in dir, skips any whitespace, then skips to the
+	 * end of the current alnum/punct run.  end_mode controls where the
+	 * cursor lands:
+	 *
+	 * - end_mode = 1 (e): skip-count 2 over whitespace so the cursor
+	 *   lands on the last char of the following word.
+	 * - end_mode = 0 (b): skip-count 1 so the cursor stops at the first
+	 *   non-space char after retreating.
+	 */
 	do {
 		char *adj =
 		    (dir == FORWARD) ? cp_next(g, g->dot) : cp_prev(g, g->dot);
@@ -87,18 +107,33 @@ run_word_dir_cmd(struct editor *g, int dir, int end_mode)
 void
 run_word_backward_cmd(struct editor *g)
 {
+	/*
+	 * == Move to the start of the current or previous word (b) ==
+	 */
 	run_word_dir_cmd(g, BACK, 0);
 }
 
 void
 run_word_end_cmd(struct editor *g)
 {
+	/*
+	 * == Move to the end of the current or next word (e) ==
+	 */
 	run_word_dir_cmd(g, FORWARD, 1);
 }
 
 static void
 run_blank_word_cmd(struct editor *g, int c)
 {
+	/*
+	 * == Implements upper-case word motions ==
+	 *
+	 * Upper-case word motions consider punctuations as letters.
+	 *
+	 * - W moves cursor to the beginning of next word
+	 * - B moves cursor to the beginning of previous word
+	 * - E mvoes cursor to the end of current or next word
+	 */
 	int dir = FORWARD;
 
 	if (c == 'B')
@@ -120,17 +155,26 @@ run_blank_word_cmd(struct editor *g, int c)
 void
 run_blank_word_backward_cmd(struct editor *g)
 {
+	/*
+	 * == Move to the start of the current or previous WORD (B) ==
+	 */
 	run_blank_word_cmd(g, 'B');
 }
 
 void
 run_blank_word_end_cmd(struct editor *g)
 {
+	/*
+	 * == Move to the end of the current or next WORD (E) ==
+	 */
 	run_blank_word_cmd(g, 'E');
 }
 
 void
 run_blank_word_forward_cmd(struct editor *g)
 {
+	/*
+	 * == Move to the start of the next WORD (W) ==
+	 */
 	run_blank_word_cmd(g, 'W');
 }

@@ -175,6 +175,12 @@ static const char *const sql_keywords[] = {
 static int
 sql_is_keyword(const char *s, int len)
 {
+	/*
+	 * == Case-insensitive check if [s, s+len) is an SQL keyword ==
+	 *
+	 * Lowercases the token into a local buffer and does a linear scan
+	 * through sql_keywords.  Returns 1 on match, 0 otherwise.
+	 */
 	char buf[32];
 	int i;
 
@@ -194,18 +200,27 @@ sql_is_keyword(const char *s, int len)
 static int
 is_ident_start(unsigned char c)
 {
+	/*
+	 * == True if c can start an SQL identifier ==
+	 */
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
 }
 
 static int
 is_ident(unsigned char c)
 {
+	/*
+	 * == True if c can continue an SQL identifier ==
+	 */
 	return is_ident_start(c) || (c >= '0' && c <= '9');
 }
 
 static void
 fill_attrs(char *attrs, int from, int to, char attr)
 {
+	/*
+	 * == Fill attrs[from..to-1] with the given ATTR_* value ==
+	 */
 	int i;
 
 	for (i = from; i < to; i++)
@@ -215,6 +230,13 @@ fill_attrs(char *attrs, int from, int to, char attr)
 static int
 sql_colorize(int state, const char *line, int len, char *attrs)
 {
+	/*
+	 * == Colorize one line of SQL and return the new cross-line state ==
+	 *
+	 * Recognises SQL keywords (case-insensitive), -- line comments,
+	 * block comments (slash-star), single-quoted string literals, and
+	 * numeric literals.  Cross-line state tracks open block comments.
+	 */
 	int i = 0;
 
 #define SET(from, to, a)                                      \

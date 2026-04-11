@@ -68,6 +68,9 @@ static const char *const py_keywords[] = {
 static int
 py_is_keyword(const char *s, int len)
 {
+	/*
+	 * == Check if the Python token [s, s+len) is in py_keywords ==
+	 */
 	int i;
 
 	for (i = 0; py_keywords[i]; i++) {
@@ -81,33 +84,43 @@ py_is_keyword(const char *s, int len)
 static int
 is_ident_start(unsigned char c)
 {
+	/*
+	 * == True if c can start a Python identifier ==
+	 */
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
 }
 
 static int
 is_ident(unsigned char c)
 {
+	/*
+	 * == True if c can continue a Python identifier ==
+	 */
 	return is_ident_start(c) || (c >= '0' && c <= '9');
 }
 
 static void
 fill_attrs(char *attrs, int from, int to, char attr)
 {
+	/*
+	 * == Fill attrs[from..to-1] with the given ATTR_* value ==
+	 */
 	int i;
 
 	for (i = from; i < to; i++)
 		attrs[i] = attr;
 }
 
-/*
- * Scan a quoted string starting at line[i] (which is already past the
- * opening delimiter).  The delimiter is q (' or ").  Handles backslash
- * escapes.  Returns the index past the closing delimiter (or len if the
- * string runs to end of line without closing).
- */
 static int
 scan_simple_string(const char *line, int len, int i, char q)
 {
+	/*
+	 * == Scan a single-line Python string literal past the closing delimiter ==
+	 *
+	 * Starts at line[i], which is one past the opening delimiter q (' or ").
+	 * Handles backslash escapes.  Returns the index just past the closing q,
+	 * or len if the string is not closed on this line.
+	 */
 	while (i < len) {
 		if (line[i] == '\\') {
 			i += 2;
@@ -122,13 +135,16 @@ scan_simple_string(const char *line, int len, int i, char q)
 	return i;
 }
 
-/*
- * Try to advance past the triple-quote closing sequence (qqq) starting at
- * line[i].  Returns the new i if found, -1 if not.
- */
 static int
 scan_triple_close(const char *line, int len, int i, char q)
 {
+	/*
+	 * == Advance past the triple-quote close (qqq) in a multi-line string ==
+	 *
+	 * Starts at line[i] and scans forward.  Handles backslash escapes.
+	 * Returns the index just past the closing triple-quote, or -1 if the
+	 * triple-quote is not found (the string continues on the next line).
+	 */
 	while (i < len) {
 		if (line[i] == '\\') {
 			i += 2;
@@ -146,6 +162,16 @@ scan_triple_close(const char *line, int len, int i, char q)
 static int
 py_colorize(int state, const char *line, int len, char *attrs)
 {
+	/*
+	 * == Colorize one line of Python and return the new cross-line state ==
+	 *
+	 * Recognises keywords, # line comments, single- and double-quoted
+	 * strings (including raw/byte prefixes r"", b""), triple-quoted
+	 * strings (spanning multiple lines via state), and integer/float/hex
+	 * number literals.  Decorators (@word) are highlighted as ATTR_PREPROC.
+	 *
+	 * Cross-line state is non-zero while inside an open triple-quoted string.
+	 */
 	int i = 0;
 
 #define SET(from, to, a)                                      \

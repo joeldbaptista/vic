@@ -50,6 +50,13 @@ is_ascii_punct(unsigned char c)
 static int
 normalize_text_object_delimiter(int obj, char *open)
 {
+	/*
+	 * == Map both halves of a delimiter pair to the open character ==
+	 *
+	 * ( and ) → '(',  [ and ] → '[',  { and } → '{',  < and > → '<'.
+	 * Sets *open to the canonical opener and returns 1.  Returns 0 if obj
+	 * is not a recognised bracket character.
+	 */
 	switch (obj) {
 	case '(':
 	case ')':
@@ -77,6 +84,16 @@ find_delimited_text_object_range(struct editor *g, char open,
                                  int inner, char **start,
                                  char **stop)
 {
+	/*
+	 * == Find the innermost balanced pair enclosing dot ==
+	 *
+	 * Scans left from dot for an open delimiter whose paired closer lies at
+	 * or after dot, using find_pair() to locate the matching closer.
+	 * Repeats g->cmdcnt times (e.g. 2i( steps up two nesting levels).
+	 * inner=1 excludes the delimiters themselves; inner=0 includes them.
+	 * Returns 0 on success with start/stop set; -1 if no enclosing pair
+	 * exists.
+	 */
 	char *scan;
 	char *left = NULL;
 	char *right = NULL;
@@ -128,6 +145,12 @@ find_delimited_text_object_range(struct editor *g, char open,
 static int
 is_escaped_quote(struct editor *g, char *p)
 {
+	/*
+	 * == True if the quote character at p is preceded by an odd number of backslashes ==
+	 *
+	 * Used to skip over escaped quotes (\" \' \`) when searching for
+	 * quote text object boundaries.
+	 */
 	int backslashes = 0;
 
 	while (p > g->text) {
@@ -145,6 +168,14 @@ static int
 find_quoted_text_object_range(struct editor *g, char quote,
                               int inner, char **start, char **stop)
 {
+	/*
+	 * == Find the innermost quoted string enclosing or starting at dot ==
+	 *
+	 * Scans left to find the nearest unescaped quote character, then
+	 * forward for the matching close quote.  Supports ', ", and `.
+	 * inner=1 gives the content between the quotes; inner=0 includes them.
+	 * Returns 0 on success, -1 if no enclosing pair is found.
+	 */
 	char *scan;
 	char *left = NULL;
 	char *right = NULL;
@@ -205,6 +236,9 @@ find_quoted_text_object_range(struct editor *g, char quote,
 static int
 is_tag_name_char(unsigned char ch)
 {
+	/*
+	 * == True if ch is a valid XML/HTML tag name character ==
+	 */
 	return isalnum(ch) || ch == '_' || ch == '-' || ch == ':';
 }
 
@@ -212,6 +246,12 @@ static int
 tag_name_equal(const char *a, size_t alen, const char *b,
                size_t blen)
 {
+	/*
+	 * == Case-insensitive comparison of two tag name byte slices ==
+	 *
+	 * Returns 1 if the names are the same length and equal under
+	 * tolower(); 0 otherwise.
+	 */
 	size_t i;
 
 	if (alen != blen)
@@ -230,6 +270,18 @@ parse_tag_at(struct editor *g, char *lt, char **gt,
              char **name_start, size_t *name_len, int *is_closing,
              int *is_self_closing)
 {
+	/*
+	 * == Parse an HTML/XML tag starting at lt ==
+	 *
+	 * lt must point to a '<' byte.  On success:
+	 *   *gt          — pointer to the closing '>'
+	 *   *name_start  — start of the tag name (past '<' or '</')
+	 *   *name_len    — byte length of the tag name
+	 *   *is_closing  — 1 if this is a </tag>, 0 for <tag>
+	 *   *is_self_closing — 1 if the tag ends with '/>' (e.g. <br/>)
+	 * Returns 1 on success, 0 if lt does not start a valid element tag
+	 * (e.g. declarations, processing instructions, malformed markup).
+	 */
 	char *p;
 	int in_quote = 0;
 	char quote = '\0';
@@ -296,6 +348,15 @@ find_matching_closing_tag(struct editor *g, char *from,
                           const char *name, size_t name_len,
                           char **close_lt, char **close_gt)
 {
+	/*
+	 * == Find the matching closing tag for an already-found opening tag ==
+	 *
+	 * Scans forward from `from`, tracking nesting depth.  Each matching
+	 * open tag increments depth; each matching close tag decrements.  When
+	 * depth reaches 0 the corresponding closer has been found.  Sets
+	 * *close_lt and *close_gt to the '<' and '>' of the closing tag.
+	 * Returns 1 on success, 0 if no match is found.
+	 */
 	char *p;
 	int depth = 1;
 
@@ -335,6 +396,14 @@ static int
 find_tag_text_object_range(struct editor *g, int inner, char **start,
                            char **stop)
 {
+	/*
+	 * == Find the enclosing HTML/XML tag pair for the 't' text object ==
+	 *
+	 * Scans left from dot to find the nearest non-self-closing, non-closing
+	 * open tag whose close tag covers dot.  Repeats g->cmdcnt times.
+	 * inner=1 gives the content between the tags; inner=0 includes both
+	 * the open and close tags.  Returns 0 on success, -1 on failure.
+	 */
 	char *anchor = g->dot;
 	char *cursor = g->dot;
 	char *open_lt = NULL;
@@ -401,6 +470,13 @@ find_tag_text_object_range(struct editor *g, int inner, char **start,
 static int
 word_obj_classify(unsigned char ch, int bigword)
 {
+	/*
+	 * == Classify a byte as WORD, PUNCT, NONSPACE, or NONE for word objects ==
+	 *
+	 * bigword=1 treats any non-whitespace as the same class (WOBJ_NONSPACE).
+	 * bigword=0 distinguishes alnum+underscore (WOBJ_WORD) from punctuation
+	 * (WOBJ_PUNCT).  Newlines and spaces are WOBJ_NONE (not part of any word).
+	 */
 	if (ch == '\n' || is_ascii_space(ch))
 		return WOBJ_NONE;
 	if (bigword)
@@ -415,6 +491,12 @@ word_obj_classify(unsigned char ch, int bigword)
 static int
 word_obj_member(unsigned char ch, int cls, int bigword)
 {
+	/*
+	 * == True if ch belongs to the same word-object class as cls ==
+	 *
+	 * Used when extending the word boundary left/right from the initial
+	 * scan point.
+	 */
 	if (bigword)
 		return ch != '\n' && !is_ascii_space(ch);
 	if (cls == WOBJ_WORD)
@@ -428,6 +510,16 @@ static int
 find_word_text_object_range(struct editor *g, int inner, int bigword,
                             char **start, char **stop)
 {
+	/*
+	 * == Find the word or WORD text object range enclosing dot ==
+	 *
+	 * Determines the character class at dot, then extends left and right
+	 * to the full run of that class.  For "around" (inner=0), also
+	 * includes trailing whitespace (or, if there is none, leading
+	 * whitespace).  Repeats g->cmdcnt times.
+	 * bigword=1 treats any non-whitespace run as one token (W/B/E-style).
+	 * Returns 0 on success, -1 if dot is on whitespace or the edge.
+	 */
 	char *scan = g->dot;
 	char *left = NULL;
 	char *right = NULL;
@@ -528,6 +620,24 @@ int
 textobj_find_range(struct editor *g, int ai_cmd, int obj, char **start,
                    char **stop, int *buftype)
 {
+	/*
+	 * == Resolve a text-object range for use by operators ==
+	 *
+	 * Dispatches on obj to find the appropriate start/stop buffer pointers
+	 * and sets *buftype (PARTIAL, MULTI, or WHOLE) to tell the operator
+	 * whether the selection spans partial lines, multiple lines, or whole
+	 * lines.
+	 *
+	 * ai_cmd == 'i' → inner; ai_cmd == 'a' → around.
+	 *
+	 * Supported objects:
+	 *   (, ), [, ], {, }, <, >  — balanced delimiter pairs
+	 *   ', ", `                 — quoted string pairs
+	 *   w, W                    — word / WORD
+	 *   t                       — XML/HTML tag pair
+	 *
+	 * Returns 0 on success, -1 (and calls indicate_error) on failure.
+	 */
 	char *p;
 	char *q;
 	char open;

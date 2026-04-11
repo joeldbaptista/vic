@@ -25,6 +25,9 @@ enum {
 static void
 fill_attrs(char *attrs, int from, int to, char attr)
 {
+	/*
+	 * == Fill attrs[from..to-1] with the given ATTR_* value ==
+	 */
 	int i;
 
 	for (i = from; i < to; i++)
@@ -34,6 +37,9 @@ fill_attrs(char *attrs, int from, int to, char attr)
 static int
 is_fence(const char *line, int len)
 {
+	/*
+	 * == True if this line starts a fenced code block (``` or ~~~) ==
+	 */
 	return len >= 3 &&
 	       ((line[0] == '`' && line[1] == '`' && line[2] == '`') ||
 	        (line[0] == '~' && line[1] == '~' && line[2] == '~'));
@@ -42,6 +48,19 @@ is_fence(const char *line, int len)
 static int
 md_colorize(int state, const char *line, int len, char *attrs)
 {
+	/*
+	 * == Colorize one line of Markdown and return the new cross-line state ==
+	 *
+	 * Recognises:
+	 *   Fenced code blocks (``` / ~~~)       — ATTR_PREPROC for the fence,
+	 *                                          ATTR_STRING for content lines
+	 *   ATX headings (#, ##, …)              — ATTR_KEYWORD
+	 *   > blockquotes                        — ATTR_COMMENT
+	 *   *bold*, _italic_, `code spans`       — ATTR_KEYWORD or ATTR_STRING
+	 *   [links](url)                         — ATTR_PREPROC for the URL
+	 *
+	 * Cross-line state is a non-zero value while inside a fenced code block.
+	 */
 	int i;
 
 #define SET(from, to, a)                                      \

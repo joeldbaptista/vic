@@ -17,6 +17,18 @@ struct op2_rule {
 static int
 match_op2(const struct parser *s, int c)
 {
+	/*
+	 * == Check whether c is a valid second key for a two-key prefix ==
+	 *
+	 * Looks up s->op in the rules table.  Each rule lists the set of
+	 * permitted follow-up keys and whether Enter (\r / \n) is also valid.
+	 *
+	 * - g: followed by g, *, #
+	 * - z: followed by z, t, b, ., -, and also Enter (zEnter aligns)
+	 * - Z: followed by Z, Q (save-and-quit / quit-without-saving)
+	 *
+	 * Returns 1 if c is accepted, 0 otherwise.
+	 */
 	const struct op2_rule *r;
 	static const struct op2_rule rules[] = {
 	    {'g', "g*#", 0},
@@ -42,6 +54,12 @@ match_op2(const struct parser *s, int c)
 int
 initparser(struct parser *s)
 {
+	/*
+	 * == Reset parser state to idle ==
+	 *
+	 * Zero-initialises *s so it is ready to accept the first keypress of
+	 * the next Normal-mode command.  Returns -1 if s is NULL.
+	 */
 	if (s == NULL)
 		return -1;
 
@@ -52,6 +70,35 @@ initparser(struct parser *s)
 int
 parse(struct parser *s, int c)
 {
+	/*
+	 * == Feed one character into the Normal-mode command parser ==
+	 *
+	 * Implements the MONRAS state machine:
+	 *   STG_START       — optional '"' register prefix or '+' shorthand
+	 *   STG_REG         — register character (a-z, 0-9, named specials)
+	 *   STG_COUNT       — optional repeat count digits before the operator
+	 *   STG_OP          — the operator character (dispatch point)
+	 *   STG_RANGE_COUNT — optional count for the range motion (e.g. 3 in d3j)
+	 *   STG_RANGE       — the motion key (w, j, G, …) or object prefix (i/a)
+	 *   STG_ANCHOR      — one follow-up character (f/t target, mark letter,
+	 *                     text-object character)
+	 *   STG_STRING      — accumulates chars until NUL (for / ? :)
+	 *   STG_OP2         — second key of a two-key sequence (gg, gU, zz, …)
+	 *
+	 * Returns 0 if more characters are needed, 1 when parsing is complete.
+	 * Check s->ok after returning 1: 1 = valid command, 0 = unrecognised.
+	 *
+	 * On return 1 the populated fields are:
+	 *   s->op     — primary operator
+	 *   s->op2    — second key (two-key sequences)
+	 *   s->rg     — range/motion key
+	 *   s->a      — anchor character (f/t target, mark, text-object)
+	 *   s->m      — operator count (0 = not given)
+	 *   s->n      — range count (0 = not given)
+	 *   s->reg    — register character ('\0' = default)
+	 *   s->b[]    — string argument (: / ? commands)
+	 *   s->raw_key — non-ASCII keycode (arrow keys, etc.)
+	 */
 	for (;;) {
 		switch (s->stg) {
 		case STG_START:

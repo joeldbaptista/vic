@@ -49,6 +49,9 @@ static const char *const sh_keywords[] = {
 static int
 sh_is_keyword(const char *s, int len)
 {
+	/*
+	 * == Check if the shell token [s, s+len) is in sh_keywords ==
+	 */
 	int i;
 
 	for (i = 0; sh_keywords[i]; i++) {
@@ -62,18 +65,27 @@ sh_is_keyword(const char *s, int len)
 static int
 is_word_start(unsigned char c)
 {
+	/*
+	 * == True if c can start a shell word (letter or underscore) ==
+	 */
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
 }
 
 static int
 is_word(unsigned char c)
 {
+	/*
+	 * == True if c can continue a shell word (letter, digit, or underscore) ==
+	 */
 	return is_word_start(c) || (c >= '0' && c <= '9');
 }
 
 static void
 fill_attrs(char *attrs, int from, int to, char attr)
 {
+	/*
+	 * == Fill attrs[from..to-1] with the given ATTR_* value ==
+	 */
 	int i;
 
 	for (i = from; i < to; i++)
@@ -83,6 +95,17 @@ fill_attrs(char *attrs, int from, int to, char attr)
 static int
 sh_colorize(int state, const char *line, int len, char *attrs)
 {
+	/*
+	 * == Colorize one line of shell script and return the new cross-line state ==
+	 *
+	 * Recognises keywords, $-variable expansions (plain, ${...}, $(...))),
+	 * #-comments, single-quoted literals, double-quoted strings (with
+	 * $-expansion inside), and integer number literals.
+	 *
+	 * Cross-line state:
+	 *   SH_NORMAL — ordinary code
+	 *   SH_DQUOTE — inside a double-quoted string continuing from the previous line
+	 */
 	int i = 0;
 
 #define SET(from, to, a)                                      \

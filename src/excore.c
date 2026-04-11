@@ -21,6 +21,16 @@
 void
 setops(struct editor *g, char *args, int flg_no)
 {
+	/*
+	 * == Parse one :set argument and update g->setops or g->tabstop ==
+	 *
+	 * args is the option string (e.g. "ts=4", "noignorecase", "number").
+	 * flg_no is 1 if the "no" prefix was already stripped from args.
+	 * Integer options (tabstop, cursorshape, cursorshape_insert) require
+	 * an "=" value and reject flg_no.  Boolean options are set or cleared
+	 * in g->setops according to flg_no.  Unknown option names are reported
+	 * via status_line_bold.
+	 */
 	char *eq;
 	int index;
 
@@ -81,6 +91,18 @@ setops(struct editor *g, char *args, int flg_no)
 char *
 expand_args(struct editor *g, char *args)
 {
+	/*
+	 * == Expand % and # in an ex command argument string ==
+	 *
+	 * Returns a newly allocated string with:
+	 *   %  replaced by g->current_filename
+	 *   #  replaced by g->alt_filename
+	 *   \X unescaped (backslash removed)
+	 *
+	 * Returns NULL and shows an error if % or # is used when the
+	 * corresponding filename is not set.  The caller is responsible for
+	 * free()ing the result.
+	 */
 	char *s;
 	const char *replace;
 

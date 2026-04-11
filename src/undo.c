@@ -26,6 +26,9 @@ static void
 push_undo_entry(struct undo_object **stack_tail,
                 struct undo_object *undo_entry)
 {
+	/*
+	 * == Push one entry onto a LIFO undo/redo stack ==
+	 */
 	undo_entry->prev = *stack_tail;
 	*stack_tail = undo_entry;
 }
@@ -33,6 +36,14 @@ push_undo_entry(struct undo_object **stack_tail,
 void
 undo_queue_commit(struct editor *g)
 {
+	/*
+	 * == Flush the in-progress undo queue into a stack entry ==
+	 *
+	 * The queue accumulates single-byte inserts/deletes during rapid
+	 * typing so they can be bundled into one undoable unit.  Call this at
+	 * command boundaries (before any motion or at ESC) to finalise the
+	 * bundle.  No-op when the queue is empty.
+	 */
 	if (g->undo_q > 0) {
 		undo_push(g, g->undo_queue + UNDO_QUEUE_MAX - g->undo_q,
 		          g->undo_q, (g->undo_queue_state | UNDO_USE_SPOS));
@@ -44,6 +55,12 @@ undo_queue_commit(struct editor *g)
 void
 flush_undo_data(struct editor *g)
 {
+	/*
+	 * == Discard all undo and redo history ==
+	 *
+	 * Frees every entry on both stacks.  Called when a new file is loaded
+	 * so undo does not leak across files.
+	 */
 	struct undo_object *undo_entry;
 
 	while (g->undo_stack_tail) {
@@ -61,6 +78,21 @@ flush_undo_data(struct editor *g)
 void
 undo_push(struct editor *g, char *src, unsigned length, int u_type)
 {
+	/*
+	 * == Record a buffer mutation for later undo ==
+	 *
+	 * For queued types (UNDO_DEL_QUEUED, UNDO_INS_QUEUED), accumulates
+	 * bytes in the small in-memory queue and flushes it when full or when
+	 * the operation type changes direction.
+	 *
+	 * For direct types (UNDO_DEL, UNDO_INS, UNDO_SWAP, and _CHAIN
+	 * variants), allocates an undo_object and pushes it onto the stack.
+	 * _CHAIN variants link adjacent operations so u applies them all as
+	 * one unit.
+	 *
+	 * - Clears the redo stack on every direct push (a new edit invalidates
+	 *   the redo history).
+	 */
 	struct undo_object *undo_entry;
 	int use_spos = u_type & UNDO_USE_SPOS;
 
@@ -143,6 +175,13 @@ undo_push(struct editor *g, char *src, unsigned length, int u_type)
 void
 undo_push_insert(struct editor *g, char *p, int len, int undo)
 {
+	/*
+	 * == Record an insertion for undo, routing to the right entry type ==
+	 *
+	 * Translates the ALLOW_UNDO / ALLOW_UNDO_CHAIN / ALLOW_UNDO_QUEUED
+	 * flag into the appropriate UNDO_INS / UNDO_INS_CHAIN / UNDO_INS_QUEUED
+	 * call to undo_push.  No-op for NO_UNDO.
+	 */
 	switch (undo) {
 	case ALLOW_UNDO:
 		undo_push(g, p, len, UNDO_INS);
@@ -160,6 +199,13 @@ static struct undo_object *
 new_undo_entry(uint8_t u_type, int start, int length,
                const char *text)
 {
+	/*
+	 * == Allocate an inverse undo_object to push onto the redo stack ==
+	 *
+	 * For DEL types, copies `length` bytes from `text` (the bytes being
+	 * re-inserted on redo).  For INS types, allocates just the header
+	 * (no payload needed — the bytes are already in the buffer).
+	 */
 	struct undo_object *undo_entry;
 
 	if (u_type == UNDO_DEL || u_type == UNDO_DEL_CHAIN) {
@@ -182,6 +228,19 @@ apply_undo_stack(struct editor *g, struct undo_object **from_stack,
                  const char *empty_msg, const char *op_label,
                  int dir)
 {
+	/*
+	 * == Replay entries from from_stack, pushing inverses onto to_stack ==
+	 *
+	 * Shared engine for undo, undo-with-redo, and redo.  Pops and applies
+	 * entries in a chain loop:
+	 * - UNDO_DEL/DEL_CHAIN: restores bytes via text_hole_make + memcpy.
+	 * - UNDO_INS/INS_CHAIN: removes bytes via text_hole_delete.
+	 * - UNDO_SWAP: replaces bytes in-place with a pure memcpy.
+	 *
+	 * The inverse of each applied entry is pushed onto to_stack so the
+	 * operation can be reversed again.  The loop stops at the first
+	 * non-chained entry.
+	 */
 	char *u_start;
 	char *u_end;
 	struct undo_object *undo_entry;
@@ -276,6 +335,12 @@ apply_undo_stack(struct editor *g, struct undo_object **from_stack,
 void
 undo_pop(struct editor *g)
 {
+	/*
+	 * == Undo the last change, discarding redo history (u without ^R) ==
+	 *
+	 * Inverse entries are not saved (to_stack = NULL), so redo is not
+	 * possible after this call.  Used by the plain 'u' binding.
+	 */
 	apply_undo_stack(g, &g->undo_stack_tail, NULL, "Already at oldest change",
 	                 "Undo", -1);
 }
@@ -283,6 +348,12 @@ undo_pop(struct editor *g)
 void
 undo_with_redo(struct editor *g)
 {
+	/*
+	 * == Undo the last change, saving an inverse for redo (U command) ==
+	 *
+	 * Inverse entries are pushed onto the redo stack so Ctrl-R can
+	 * replay them.
+	 */
 	apply_undo_stack(g, &g->undo_stack_tail, &g->redo_stack_tail,
 	                 "Already at oldest change", "Undo", -1);
 }
@@ -290,6 +361,9 @@ undo_with_redo(struct editor *g)
 void
 redo_pop(struct editor *g)
 {
+	/*
+	 * == Redo the last undone change (Ctrl-R) ==
+	 */
 	apply_undo_stack(g, &g->redo_stack_tail, &g->undo_stack_tail,
 	                 "Already at newest change", "Redo", 1);
 }
@@ -343,6 +417,13 @@ struct undo_rec_hdr {
 static int
 utype_has_data(uint8_t t)
 {
+	/*
+	 * == True if this u_type stores saved bytes in undo_text ==
+	 *
+	 * DEL and SWAP entries embed the original bytes so they can be
+	 * restored without re-reading the file.  INS entries do not (the
+	 * bytes are already in the live buffer).
+	 */
 	return (t == UNDO_DEL || t == UNDO_DEL_CHAIN || t == UNDO_SWAP);
 }
 
@@ -350,6 +431,13 @@ utype_has_data(uint8_t t)
 static char *
 undofile_path(const char *fn)
 {
+	/*
+	 * == Build the sidecar path for the undo file ==
+	 *
+	 * For a file at "/dir/basename", returns "/dir/.basename.vundo".
+	 * For a bare name "basename", returns ".basename.vundo".
+	 * The caller is responsible for freeing the returned string.
+	 */
 	const char *slash = strrchr(fn, '/');
 	const char *base = slash ? slash + 1 : fn;
 	size_t dirlen = (size_t)(base - fn); /* 0 if no slash */
@@ -363,10 +451,16 @@ undofile_path(const char *fn)
 	return out;
 }
 
-/* Additive byte checksum over the entire in-memory buffer */
 static uint32_t
 buf_checksum(const struct editor *g)
 {
+	/*
+	 * == Additive byte checksum over the entire in-memory buffer ==
+	 *
+	 * Used to verify that the saved undo sidecar still matches the file on
+	 * disk when loading.  A mismatch means the file was edited externally
+	 * and the undo history is no longer valid.
+	 */
 	uint32_t s = 0;
 	const unsigned char *p = (const unsigned char *)g->text;
 	const unsigned char *e = (const unsigned char *)g->end;
@@ -379,6 +473,19 @@ buf_checksum(const struct editor *g)
 void
 undo_save(struct editor *g, const char *fn)
 {
+	/*
+	 * == Persist the undo stack to a sidecar file ==
+	 *
+	 * Writes a binary ".basename.vundo" file next to the edited file so
+	 * undo history survives across editing sessions.  The file header
+	 * records the buffer size and a byte checksum; these are checked on
+	 * load to reject stale data if the file was modified externally.
+	 *
+	 * - Does nothing when VI_UNDOFILE is off or the stack is empty.
+	 * - Removes any existing sidecar when the stack is empty.
+	 * - Records are written oldest-first so push-on-load reconstructs the
+	 *   original LIFO order.
+	 */
 	char *path;
 	int fd;
 	struct stat st;
@@ -450,6 +557,18 @@ undo_save(struct editor *g, const char *fn)
 void
 undo_load(struct editor *g, const char *fn)
 {
+	/*
+	 * == Restore the undo stack from a sidecar file ==
+	 *
+	 * Reads the ".basename.vundo" sidecar written by undo_save().  Before
+	 * loading, validates that the magic bytes, version, file size, and
+	 * buffer checksum all match; if any check fails the sidecar is silently
+	 * ignored.  Records are pushed in read (oldest-first) order, which
+	 * reconstructs the same LIFO stack as the original session.
+	 *
+	 * - Silently returns if VI_UNDOFILE is off, the file has no sidecar,
+	 *   or the sidecar does not match the current buffer.
+	 */
 	char *path;
 	int fd;
 	struct stat st;

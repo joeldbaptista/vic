@@ -44,6 +44,21 @@ static char *
 get_one_address(struct editor *g, char *p, int *result,
                 int *valid)
 {
+	/*
+	 * == Parse one ex address from the command string ==
+	 *
+	 * An address can be:
+	 *   .        — current line
+	 *   $        — last line
+	 *   'x       — mark x (a-z, <, >)
+	 *   /pat/    — forward search
+	 *   ?pat?    — backward search
+	 *   N        — absolute line number
+	 *   +N / -N  — offset from the previous address
+	 *
+	 * Sets *result to the resolved 1-based line number and *valid to TRUE
+	 * if an address was actually found.  Returns the updated position in p.
+	 */
 	int num;
 	int sign;
 	int addr;
@@ -156,6 +171,15 @@ static char *
 get_address(struct editor *g, char *p, int *b, int *e,
             unsigned *got)
 {
+	/*
+	 * == Parse a full ex address specification (up to two addresses) ==
+	 *
+	 * Handles %, N, N,M, and N;M forms by calling get_one_address
+	 * repeatedly.  On ';' the current dot is temporarily moved to the
+	 * first address so the second is evaluated relative to it.
+	 * Encodes the result in *got (bit 0 = one address, bit 1 = range),
+	 * *b = start line, *e = end line.  Restores g->dot before returning.
+	 */
 	int state = GET_ADDRESS;
 	int valid;
 	int addr;
@@ -198,6 +222,12 @@ get_address(struct editor *g, char *p, int *b, int *e,
 static char *
 strchr_backslash(const char *s, int c)
 {
+	/*
+	 * == Like strchr, but skips backslash-escaped characters ==
+	 *
+	 * Used to find the unescaped delimiter in :s/pat/rep/ and similar
+	 * expressions.  Returns a pointer to the first unescaped c, or NULL.
+	 */
 	while (*s) {
 		if (*s == c)
 			return (char *)s;
@@ -214,6 +244,20 @@ regex_search(struct editor *g, char *q, regex_t *preg,
              const char *Rorig, size_t *len_F, size_t *len_R,
              char **R)
 {
+	/*
+	 * == Find the next match on line q and build the replacement string ==
+	 *
+	 * Runs regexec on the line containing q.  On a match:
+	 *   *len_F — byte length of the matched text (the "find" part)
+	 *   *len_R — byte length of the computed replacement
+	 *   *R     — heap-allocated replacement string (caller must free)
+	 *
+	 * Replacement metacharacters in Rorig:
+	 *   \0 … \9  — captured group 0–9
+	 *
+	 * Two-pass: first pass computes *len_R with *R=NULL; second pass fills
+	 * the allocated buffer.  Returns a pointer to the match start, or NULL.
+	 */
 	regmatch_t regmatch[MAX_SUBPATTERN];
 	regmatch_t *cur_match;
 	char *found = NULL;
@@ -426,6 +470,12 @@ typedef void (*colon_fn)(struct editor *, const struct colon_state *);
 static void
 colon_do_addr_jump(struct editor *g, int e)
 {
+	/*
+	 * == Move dot to line e when an address was given but no command ==
+	 *
+	 * A bare line number in ex (e.g. ":42" or ":$") jumps to that line
+	 * and skips over leading whitespace.
+	 */
 	if (e >= 0) {
 		g->dot = find_line(g, e);
 		dot_skip_over_ws(g);
@@ -435,6 +485,12 @@ colon_do_addr_jump(struct editor *g, int e)
 static void
 colon_do_linenum(struct editor *g, int e, unsigned got)
 {
+	/*
+	 * == Print the line number on the status line (:=) ==
+	 *
+	 * Shows the addressed line number, or the current line if no address
+	 * was given.
+	 */
 	if (!(got & 1))
 		e = count_lines(g, g->text, g->dot);
 	status_line(g, "%d", e);
@@ -443,6 +499,9 @@ colon_do_linenum(struct editor *g, int e, unsigned got)
 static void
 colon_do_delete(struct editor *g, const struct colon_state *cs)
 {
+	/*
+	 * == :delete [range] — yank and delete the addressed lines ==
+	 */
 	char *q = cs->q, *r = cs->r;
 
 	if (!(cs->got & 1)) {
@@ -456,6 +515,13 @@ colon_do_delete(struct editor *g, const struct colon_state *cs)
 static void
 colon_do_edit(struct editor *g, const struct colon_state *cs)
 {
+	/*
+	 * == :edit [file] — discard buffer and load a new file ==
+	 *
+	 * Refuses if the buffer has unsaved changes and ! is not given.
+	 * With no argument, reloads the current file.  Clears the yank
+	 * register after the load.
+	 */
 	int size;
 	char *fn;
 
@@ -491,6 +557,9 @@ colon_do_edit(struct editor *g, const struct colon_state *cs)
 static void
 colon_do_features(struct editor *g, const struct colon_state *cs)
 {
+	/*
+	 * == :features — print the built-in help and wait for Enter ==
+	 */
 	(void)cs;
 	go_bottom_and_clear_to_eol(g);
 	cookmode(g);
@@ -502,6 +571,13 @@ colon_do_features(struct editor *g, const struct colon_state *cs)
 static void
 colon_do_file(struct editor *g, const struct colon_state *cs)
 {
+	/*
+	 * == :file [name] — display or change the current filename ==
+	 *
+	 * With no argument, redisplays the status line (which shows the
+	 * filename).  With an argument, changes g->current_filename to the
+	 * expanded name without reloading the buffer.
+	 */
 	char *exp;
 
 	if (cs->e >= 0) {
@@ -522,6 +598,9 @@ colon_do_file(struct editor *g, const struct colon_state *cs)
 static void
 colon_do_mark(struct editor *g, const struct colon_state *cs)
 {
+	/*
+	 * == :mark x — set mark x to the addressed line (or current line) ==
+	 */
 	int idx;
 
 	idx = ((unsigned char)cs->args[0] | 0x20) - 'a';
@@ -535,6 +614,12 @@ colon_do_mark(struct editor *g, const struct colon_state *cs)
 static void
 colon_do_list(struct editor *g, const struct colon_state *cs)
 {
+	/*
+	 * == :list [range] — display addressed line(s) showing non-printable chars ==
+	 *
+	 * Non-printable bytes are shown as ^X; multi-byte non-printables as '.'.
+	 * The line ends with a visible '$' to indicate the newline.
+	 */
 #define MAXPRINT (sizeof(ESC_BOLD_TEXT "^?" ESC_NORM_TEXT) + 1)
 	char *q = cs->q, *r = cs->r;
 	char *dst;
@@ -577,18 +662,33 @@ colon_do_list(struct editor *g, const struct colon_state *cs)
 static void
 colon_do_global(struct editor *g, const struct colon_state *cs)
 {
+	/*
+	 * == :global/pat/cmd — run cmd on every line matching pat ==
+	 */
 	global(g, cs->args, 0, cs->b, cs->e, cs->got);
 }
 
 static void
 colon_do_vglobal(struct editor *g, const struct colon_state *cs)
 {
+	/*
+	 * == :vglobal/pat/cmd — run cmd on every line NOT matching pat ==
+	 */
 	global(g, cs->args, 1, cs->b, cs->e, cs->got);
 }
 
 static void
 colon_do_quit(struct editor *g, const struct colon_state *cs)
 {
+	/*
+	 * == :quit / :next / :prev — navigate or exit the file loop ==
+	 *
+	 * :q  — exit editing the current file (errors if unsaved or more files)
+	 * :q! — force-quit, discarding changes
+	 * :n  — move to the next file in the argument list
+	 * :p  — move to the previous file in the argument list
+	 * All three set g->editing=0 to signal the file loop to advance.
+	 */
 	int n;
 
 	if (cs->useforce) {
@@ -628,6 +728,13 @@ colon_do_quit(struct editor *g, const struct colon_state *cs)
 static void
 colon_do_read_cmd(struct editor *g, int e, unsigned got, const char *cmd)
 {
+	/*
+	 * == :r!cmd — run cmd via /bin/sh and insert its output into the buffer ==
+	 *
+	 * Forks a child, redirects stdout+stderr to a pipe, reads all output,
+	 * and inserts it after the addressed line (or current line if none).
+	 * The number of lines inserted is shown on the status line.
+	 */
 	int pipefd[2];
 	pid_t pid;
 	char *buf;
@@ -709,6 +816,13 @@ colon_do_read_cmd(struct editor *g, int e, unsigned got, const char *cmd)
 static void
 colon_do_read(struct editor *g, const struct colon_state *cs)
 {
+	/*
+	 * == :read [file | !cmd] — insert file contents or command output ==
+	 *
+	 * With no arg: re-reads the current file.  With a filename: inserts the
+	 * file after the addressed line.  With !cmd: delegates to
+	 * colon_do_read_cmd.
+	 */
 	int size;
 	int num;
 	char *fn = g->current_filename;
@@ -757,6 +871,12 @@ colon_do_read(struct editor *g, const struct colon_state *cs)
 static void
 colon_do_rewind(struct editor *g, const struct colon_state *cs)
 {
+	/*
+	 * == :rewind — restart the file loop from the first file ==
+	 *
+	 * Sets optind to -1 so the next iteration of the file loop reloads
+	 * file 0.  Refuses if there are unsaved changes unless ! is given.
+	 */
 	if (g->modified_count && !cs->useforce) {
 		status_line_bold(g, "No write since last change (:%s! overrides)", cs->cmd);
 	} else {
@@ -768,6 +888,14 @@ colon_do_rewind(struct editor *g, const struct colon_state *cs)
 static void
 colon_do_set(struct editor *g, const struct colon_state *cs)
 {
+	/*
+	 * == :set [option ...] — display or change editor options ==
+	 *
+	 * With no args or "all": prints a summary of all current settings.
+	 * Otherwise splits the argument string on whitespace and calls setops()
+	 * for each token, stripping a leading "no" prefix to handle "noignorecase"
+	 * style.
+	 */
 	char *args = cs->args;
 	char *argp;
 	char *argn;
@@ -811,6 +939,15 @@ colon_do_set(struct editor *g, const struct colon_state *cs)
 static void
 colon_do_substitute(struct editor *g, const struct colon_state *cs)
 {
+	/*
+	 * == :s/pat/rep/[g] — regex substitution over the addressed range ==
+	 *
+	 * Compiles the pattern and iterates over each line in [b, e].  On each
+	 * line calls regex_search to find the match and build the replacement.
+	 * The 'g' flag replaces all occurrences on the line (not just the first).
+	 * All replacements on the same command are chained into one undo unit.
+	 * An empty pattern reuses the last search pattern.
+	 */
 	char *buf = cs->args; /* already past 's' and whitespace */
 	char *q = cs->q;
 	int b = cs->b, e = cs->e;
@@ -922,6 +1059,9 @@ colon_do_substitute(struct editor *g, const struct colon_state *cs)
 static void
 colon_do_version(struct editor *g, const struct colon_state *cs)
 {
+	/*
+	 * == :version — print the version string on the status line ==
+	 */
 	(void)cs;
 	status_line(g, "standalone vi");
 }
@@ -929,6 +1069,16 @@ colon_do_version(struct editor *g, const struct colon_state *cs)
 static void
 colon_do_write(struct editor *g, const struct colon_state *cs)
 {
+	/*
+	 * == :write / :wq / :wn / :x — write buffer to file ==
+	 *
+	 * Writes the addressed range (or entire buffer for :w with no range).
+	 * Refuses to overwrite a different file unless ! is given.  After a
+	 * successful full-buffer write, clears the modified flag.
+	 *   :wq / :x — also exits (g->editing = 0)
+	 *   :wn      — also advances to the next file
+	 *   :x       — write only if modified, then exit
+	 */
 	char *q = cs->q, *r = cs->r;
 	int should_write;
 	int size;
@@ -995,6 +1145,12 @@ colon_do_write(struct editor *g, const struct colon_state *cs)
 static void
 colon_do_yank(struct editor *g, const struct colon_state *cs)
 {
+	/*
+	 * == :yank [range] — copy addressed line(s) into the register ==
+	 *
+	 * Defaults to the current line if no address is given.  Shows the
+	 * line/char count on the status line.
+	 */
 	char *q = cs->q, *r = cs->r;
 	int lines;
 
@@ -1019,6 +1175,14 @@ colon_do_yank(struct editor *g, const struct colon_state *cs)
 static int
 run_tokenize(char *buf, char *argv[], int max_argc)
 {
+	/*
+	 * == Tokenise a :run argument string into argv[] ==
+	 *
+	 * Splits buf on whitespace.  Single- and double-quoted tokens may
+	 * contain embedded spaces (the quote characters are stripped).
+	 * Modifies buf in-place by NUL-terminating each token.
+	 * Returns argc (capped at max_argc).
+	 */
 	int argc = 0;
 	char *p = buf;
 
@@ -1048,6 +1212,13 @@ run_tokenize(char *buf, char *argv[], int max_argc)
 static void
 colon_do_run(struct editor *g, const struct colon_state *cs)
 {
+	/*
+	 * == :run cmd [args] — invoke a built-in editing command by name ==
+	 *
+	 * Tokenises the argument string and dispatches to run_dispatch().
+	 * The addressed range (or the full buffer) is passed as the region
+	 * the command operates on.
+	 */
 	char *argv[RUN_MAX_ARGS];
 	int argc;
 	char *range_start, *range_end;
@@ -1077,6 +1248,13 @@ colon_do_run(struct editor *g, const struct colon_state *cs)
 static void
 colon_do_shell(struct editor *g, const char *cmd)
 {
+	/*
+	 * == :!cmd — run a shell command and wait for Enter ==
+	 *
+	 * Temporarily restores cooked mode, runs cmd via system(), then prompts
+	 * "Press ENTER to continue" before returning to raw mode and redrawing.
+	 * An empty cmd launches $SHELL interactively.
+	 */
 	const char *sh;
 
 	if (!cmd || !*cmd) {
@@ -1153,6 +1331,21 @@ static const struct colon_entry colon_cmds[] = {
 void
 colon(struct editor *g, char *buf)
 {
+	/*
+	 * == Parse and execute one ex (colon) command ==
+	 *
+	 * Entry point for all ':'-prefixed commands.  Strips leading colons and
+	 * whitespace, calls get_address to resolve any range, then:
+	 *
+	 *   '!'  — delegates to colon_do_shell
+	 *   '='  — delegates to colon_do_linenum
+	 *   bare address — delegates to colon_do_addr_jump
+	 *   alpha command — looks up colon_cmds[] (prefix match, min length
+	 *                   respected) and calls the matching handler
+	 *
+	 * After the handler returns, g->dot is clamped within the buffer via
+	 * bound_dot().
+	 */
 	char cs_cmd[16]; /* longest command name: "substitute" (10 chars) */
 	struct colon_state cs;
 	size_t i;

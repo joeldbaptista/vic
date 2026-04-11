@@ -24,6 +24,14 @@
 void
 edit_run_start_insert_cmd(struct editor *g)
 {
+	/*
+	 * == Enter INSERT mode ==
+	 *
+	 * Sets g->cmd_mode = 1 and commits any pending undo queue so the
+	 * preceding Normal-mode command is recorded as one undo unit.
+	 * g->newindent = -1 means "inherit the indent of the previous line"
+	 * when autoindent fires on the first newline.
+	 */
 	g->newindent = -1;
 	g->cmd_mode = 1;
 	undo_queue_commit(g);
@@ -32,6 +40,13 @@ edit_run_start_insert_cmd(struct editor *g)
 void
 edit_run_start_replace_cmd(struct editor *g)
 {
+	/*
+	 * == Enter REPLACE mode (R) ==
+	 *
+	 * Sets g->cmd_mode = 2.  g->rstart records the entry position so that
+	 * backspace during replace can undo character-by-character back to
+	 * the start of the replacement session.
+	 */
 	g->cmd_mode = 2;
 	undo_queue_commit(g);
 	g->rstart = g->dot;
@@ -40,6 +55,9 @@ edit_run_start_replace_cmd(struct editor *g)
 void
 edit_run_insert_before_first_nonblank_cmd(struct editor *g)
 {
+	/*
+	 * == Insert before the first non-blank on the current line (I) ==
+	 */
 	dot_begin(g);
 	dot_skip_over_ws(g);
 	edit_run_start_insert_cmd(g);
@@ -48,12 +66,21 @@ edit_run_insert_before_first_nonblank_cmd(struct editor *g)
 void
 edit_run_insert_before_cmd(struct editor *g)
 {
+	/*
+	 * == Insert before the cursor (i) ==
+	 */
 	edit_run_start_insert_cmd(g);
 }
 
 void
 edit_run_append_after_cmd(struct editor *g)
 {
+	/*
+	 * == Append after the cursor (a) ==
+	 *
+	 * Steps dot one codepoint right (unless already on a newline) so that
+	 * subsequent inserts land after the current character.
+	 */
 	if (*g->dot != '\n')
 		g->dot = cp_next(g, g->dot);
 	edit_run_start_insert_cmd(g);
@@ -62,6 +89,9 @@ edit_run_append_after_cmd(struct editor *g)
 void
 edit_run_append_eol_cmd(struct editor *g)
 {
+	/*
+	 * == Append after the end of the current line (A) ==
+	 */
 	dot_end(g);
 	edit_run_append_after_cmd(g);
 }
@@ -69,6 +99,13 @@ edit_run_append_eol_cmd(struct editor *g)
 void
 edit_run_join_lines_cmd(struct editor *g)
 {
+	/*
+	 * == Join the current line with the next (J) ==
+	 *
+	 * Replaces the trailing newline of the current line with a space, then
+	 * strips any leading blanks on the joined line so adjacent words are
+	 * separated by exactly one space.  Repeats g->cmdcnt times.
+	 */
 	do {
 		dot_end(g);
 		if (g->dot < g->end - 1) {
@@ -85,6 +122,13 @@ edit_run_join_lines_cmd(struct editor *g)
 void
 edit_run_open_line_cmd(struct editor *g, const struct cmd_ctx *ctx)
 {
+	/*
+	 * == Open a new line below (o) or above (O) the current line ==
+	 *
+	 * o: moves to end_line and inserts '\n', entering INSERT mode after.
+	 * O: moves to begin_line, captures the current indent for autoindent,
+	 *    inserts '\n', then backs up so the new line is above.
+	 */
 	int above = ctx && ctx->op == 'O';
 	if (above) {
 		dot_begin(g);

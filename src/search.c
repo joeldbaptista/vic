@@ -46,6 +46,16 @@ is_word_byte(unsigned char c)
 char *
 get_input_line(struct editor *g, const char *prompt)
 {
+	/*
+	 * == Read a line of text from the user on the status line ==
+	 *
+	 * Displays prompt at the bottom of the screen and accumulates
+	 * characters into g->input_buf.  Backspace removes the last codepoint
+	 * (but not past the prompt start).  Enter, ESC, or MAX_INPUT_LEN
+	 * terminates input.  Returns g->input_buf (always valid).
+	 *
+	 * Used as the input backend for /, ?, and : commands.
+	 */
 	char *buf = g->input_buf;
 	int c;
 	int i;
@@ -83,6 +93,20 @@ char *
 char_search(struct editor *g, char *p, const char *pat,
             int dir_and_range)
 {
+	/*
+	 * == Regex search for pat starting at p, forward or backward ==
+	 *
+	 * dir_and_range encodes direction and scope:
+	 *   positive → forward from p to end-of-buffer (or end-of-line if
+	 *              the FULL bit is clear)
+	 *   negative → backward; finds the last match before p
+	 *
+	 * For backward searches, scans line by line and keeps re-matching
+	 * within each segment to find the rightmost occurrence.
+	 * Returns a pointer to the match start in the buffer, or NULL if no
+	 * match is found.  The pattern is compiled with REG_EXTENDED |
+	 * REG_NEWLINE, plus REG_ICASE when ignorecase is set.
+	 */
 	regex_t preg;
 	regmatch_t m;
 	int flags;
@@ -156,6 +180,18 @@ static char *
 make_word_search_pattern(struct editor *g, char dir_prefix,
                          int whole_word)
 {
+	/*
+	 * == Build a search pattern string for the word under the cursor ==
+	 *
+	 * Finds the extent of the word at g->dot (alnum + underscore), then
+	 * builds a heap-allocated string of the form:
+	 *   dir_prefix + [\<] + word + [\>]
+	 * where dir_prefix is '/' or '?' and the word-boundary anchors are
+	 * included only when whole_word is set and the word is ASCII-only.
+	 *
+	 * Returns NULL if dot is not on a word character.  The caller is
+	 * responsible for freeing the returned string.
+	 */
 	char *p = cp_start(g, g->dot);
 	char *start;
 	char *end;
@@ -208,6 +244,15 @@ make_word_search_pattern(struct editor *g, char dir_prefix,
 void
 search_run_word_cmd(struct editor *g, int c, int whole_word)
 {
+	/*
+	 * == Implement *, #, g*, g# — search for the word under the cursor ==
+	 *
+	 * Builds a pattern for the word at dot, stores it in
+	 * g->last_search_pattern, then delegates to search_run_cmd.
+	 * c == '*' or 'g*' → forward search ('/'); '#' or 'g#' → backward ('?').
+	 * whole_word=1 adds \< \> word-boundary anchors; whole_word=0 omits them
+	 * (g* and g# variants).
+	 */
 	struct cmd_ctx nctx;
 	char *pattern = make_word_search_pattern(g, c == '*' ? '/' : '?', whole_word);
 
@@ -229,6 +274,18 @@ search_run_word_cmd(struct editor *g, int c, int whole_word)
 void
 search_run_cmd(struct editor *g, const struct cmd_ctx *ctx)
 {
+	/*
+	 * == Execute a search command: /, ?, n, N ==
+	 *
+	 * For / and ?: prompts interactively (or uses the pre-parsed string
+	 * from the parser), updates g->last_search_pattern, then normalises
+	 * to 'n'.  For n/N: determines direction from the stored pattern
+	 * prefix ('/' = forward, '?' = backward; N reverses).
+	 *
+	 * Searches forward by stepping one codepoint past dot.  On failure
+	 * wraps around from the opposite buffer end.  Reports wrap-around and
+	 * "Pattern not found" via status_line_bold.  Repeats g->cmdcnt times.
+	 */
 	char *q;
 	int dir;
 	int c = (int)(unsigned char)ctx->op;

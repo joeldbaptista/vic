@@ -185,6 +185,12 @@ static const char *const cpp_keywords[] = {
 static int
 is_keyword(const char *s, int len, const char *const *kw)
 {
+	/*
+	 * == Check if the token [s, s+len) is in the keyword table kw ==
+	 *
+	 * Linear scan through the NULL-terminated kw array.  Returns 1 on
+	 * match, 0 otherwise.
+	 */
 	int i;
 
 	for (i = 0; kw[i]; i++) {
@@ -198,18 +204,30 @@ is_keyword(const char *s, int len, const char *const *kw)
 static int
 is_ident_start(unsigned char c)
 {
+	/*
+	 * == True if c can start a C/C++ identifier ==
+	 */
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
 }
 
 static int
 is_ident(unsigned char c)
 {
+	/*
+	 * == True if c can continue a C/C++ identifier (letter, digit, or _) ==
+	 */
 	return is_ident_start(c) || (c >= '0' && c <= '9');
 }
 
 static void
 fill_attrs(char *attrs, int from, int to, char attr)
 {
+	/*
+	 * == Fill attrs[from..to-1] with the given ATTR_* value ==
+	 *
+	 * No-op when attrs is NULL (used for pre-scan passes that only need
+	 * the returned state).
+	 */
 	int i;
 
 	for (i = from; i < to; i++)
@@ -220,6 +238,20 @@ static int
 colorize_impl(int state, const char *line, int len, char *attrs,
               const char *const *kw)
 {
+	/*
+	 * == Colorize one line of C/C++ source and return the new cross-line state ==
+	 *
+	 * Applies syntax highlighting for a single line [line, line+len) using
+	 * the given keyword table kw.  Fills attrs[] with ATTR_* values for each
+	 * byte.  If attrs is NULL, only the returned state value is meaningful
+	 * (used for pre-scan by screen.c to seed color_state at screenbegin).
+	 *
+	 * Cross-line state:
+	 *   CS_NORMAL           — start of line in normal mode
+	 *   CS_BLOCK_CMT        — inside a block comment (slash-star)
+	 *   CS_BLOCK_CMT_STAR   — inside block comment, last byte was '*'
+	 *   CS_PREPROC_CONT     — preprocessor continuation (trailing '\')
+	 */
 	int i = 0;
 	int new_state = CS_NORMAL;
 
@@ -394,12 +426,22 @@ done:
 static int
 c_colorize(int state, const char *line, int len, char *attrs)
 {
+	/*
+	 * == Colorize one line of C source using the C keyword table ==
+	 *
+	 * Thin wrapper around colorize_impl for the C colorizer entry point.
+	 */
 	return colorize_impl(state, line, len, attrs, c_keywords);
 }
 
 static int
 cpp_colorize(int state, const char *line, int len, char *attrs)
 {
+	/*
+	 * == Colorize one line of C++ source using the C++ keyword table ==
+	 *
+	 * Thin wrapper around colorize_impl for the C++ colorizer entry point.
+	 */
 	return colorize_impl(state, line, len, attrs, cpp_keywords);
 }
 

@@ -70,6 +70,12 @@ enum {
 void
 show_help(void)
 {
+	/*
+	 * == Print a brief feature summary to stdout ==
+	 *
+	 * Called when the user passes -h / --help.  Lists the most notable
+	 * features available in this vi implementation.
+	 */
 	puts("These features are available:"
 	     "\n\tPattern searches with / and ?"
 	     "\n\tLast command repeat with ."
@@ -85,6 +91,17 @@ show_help(void)
 void
 sync_cursor(struct editor *g, char *d, int *row, int *col)
 {
+	/*
+	 * == Scroll screenbegin so d is visible and compute its screen row/col ==
+	 *
+	 * If d is above the visible window, scrolls the screen up (or re-centres
+	 * if d moved more than half a page).  If d is below, scrolls down by
+	 * the minimum needed, again re-centring for large jumps.  Then computes
+	 * d's logical column (accounting for tabs/UTF-8) and shifts g->offset
+	 * left/right so the column falls within the visible horizontal window.
+	 * Writes the resulting 0-based screen row into *row and screen column
+	 * into *col.
+	 */
 	char *beg_cur;
 	char *tp;
 	int cnt, ro, co;
@@ -152,6 +169,12 @@ sync_cursor(struct editor *g, char *d, int *row, int *col)
 static void
 flash(int h)
 {
+	/*
+	 * == Briefly invert the terminal display for visual error feedback ==
+	 *
+	 * Turns on reverse-video for h centiseconds then restores normal video.
+	 * Used by indicate_error() when VI_ERR_METHOD is set to visual flash.
+	 */
 	fputs(ESC "[?5h", stdout); /* reverse video on */
 	mysleep(h);
 	fputs(ESC "[?5l", stdout); /* reverse video off */
@@ -160,6 +183,13 @@ flash(int h)
 void
 indicate_error(struct editor *g)
 {
+	/*
+	 * == Signal an error to the user (bell or visual flash) ==
+	 *
+	 * Sets g->cmd_error so callers can detect the error after the fact.
+	 * Emits a terminal bell unless VI_ERR_METHOD is set to visual, in which
+	 * case flash() is called instead.
+	 */
 	g->cmd_error = TRUE;
 	if (!IS_ERR_METHOD(g)) {
 		fputs(ESC_BELL, stdout);
@@ -171,6 +201,14 @@ indicate_error(struct editor *g)
 int
 get_motion_char(struct editor *g)
 {
+	/*
+	 * == Read the next command character, absorbing an optional digit count ==
+	 *
+	 * Reads one character from input.  If it is a non-zero digit, keeps
+	 * reading digits and accumulates the number into g->cmdcnt (multiplied
+	 * with any existing cmdcnt).  Returns the first non-digit character.
+	 * Used by motion commands that may be preceded by a repeat count.
+	 */
 
 	int c, cnt;
 
@@ -191,6 +229,13 @@ get_motion_char(struct editor *g)
 void
 reset_ydreg(struct editor *g)
 {
+	/*
+	 * == Reset the yank/delete register to the default unnamed register ==
+	 *
+	 * Sets g->ydreg to 26 (the unnamed register) and clears g->adding2q.
+	 * Called after any command that consumes the register so the next
+	 * yank/delete goes to the right place.
+	 */
 
 	g->ydreg = 26;
 	g->adding2q = 0;
@@ -199,6 +244,14 @@ reset_ydreg(struct editor *g)
 char *
 find_pair(struct editor *g, char *p, const char c)
 {
+	/*
+	 * == Find the matching bracket for the bracket character at p ==
+	 *
+	 * Handles the pairs ()  []  {}  <>.  Searches forward for open brackets
+	 * and backward for close brackets, tracking nesting level.
+	 * Returns a pointer to the matching bracket, or NULL if not found or if
+	 * c is not a recognised bracket character.
+	 */
 	(void)g;
 
 	const char *braces = "()[]{}<>";
@@ -233,6 +286,13 @@ find_pair(struct editor *g, char *p, const char c)
 void
 showmatching(struct editor *g, char *p)
 {
+	/*
+	 * == Briefly move the cursor to the matching bracket and bounce back ==
+	 *
+	 * Calls find_pair() on the character at p.  If a match is found, moves
+	 * dot there, redraws, pauses 40 ms, then restores dot and redraws again
+	 * — giving a brief visual highlight.  Rings the error bell if no match.
+	 */
 	char *q, *save_dot;
 
 	q = find_pair(g, p, *p);
@@ -256,6 +316,13 @@ showmatching(struct editor *g, char *p)
 static void
 winch_handler(int sig UNUSED_PARAM)
 {
+	/*
+	 * == SIGWINCH handler — mark that a terminal resize is pending ==
+	 *
+	 * Sets vi_g.need_winch = 1.  The actual resize work (re-query dimensions,
+	 * allocate new screen, redraw) is deferred to process_pending_signals()
+	 * so it runs outside the signal handler.
+	 */
 	(void)sig;
 	vi_g.need_winch = 1;
 }
@@ -263,6 +330,12 @@ winch_handler(int sig UNUSED_PARAM)
 static void
 tstp_handler(int sig UNUSED_PARAM)
 {
+	/*
+	 * == SIGTSTP handler — mark that a job-suspend is pending ==
+	 *
+	 * Sets vi_g.need_tstp = 1.  The actual suspend sequence (cookmode,
+	 * raise(SIGSTOP), rawmode, redraw) is deferred to process_pending_signals().
+	 */
 	(void)sig;
 	vi_g.need_tstp = 1;
 }
@@ -270,6 +343,13 @@ tstp_handler(int sig UNUSED_PARAM)
 static void
 int_handler(int sig)
 {
+	/*
+	 * == SIGINT handler — mark that an interrupt is pending ==
+	 *
+	 * Sets vi_g.need_int = 1.  process_pending_signals() will siglongjmp
+	 * to g->restart, aborting any in-progress command and returning to the
+	 * main edit loop.
+	 */
 	(void)sig;
 	vi_g.need_int = 1;
 }
@@ -277,6 +357,14 @@ int_handler(int sig)
 void
 process_pending_signals(struct editor *g)
 {
+	/*
+	 * == Handle deferred SIGINT / SIGWINCH / SIGTSTP actions ==
+	 *
+	 * Called from the main edit loop at safe points (not inside a signal
+	 * handler).  Processes at most one pending signal per call in priority
+	 * order: INT first (longjmps), then WINCH (resize + redraw), then TSTP
+	 * (suspend: cookmode → SIGSTOP → rawmode → redraw).
+	 */
 	if (g->need_int) {
 		g->need_int = 0;
 		siglongjmp(g->restart, SIGINT);
@@ -317,18 +405,37 @@ struct cmd_entry {
 static void
 run_status_mark_dirty_cmd(struct editor *g)
 {
+	/*
+	 * == ^G — force the status line to redisplay on the next refresh ==
+	 *
+	 * Clears g->last_status_cksum so show_status_line() considers the
+	 * status stale and redraws it.
+	 */
 	g->last_status_cksum = 0;
 }
 
 static void
 run_redraw_cmd(struct editor *g)
 {
+	/*
+	 * == ^L — force a full screen redraw ==
+	 *
+	 * Calls redraw(g, TRUE) to repaint every line unconditionally.
+	 * Useful after terminal corruption or after returning from a shell command.
+	 */
 	redraw(g, TRUE);
 }
 
 static void
 run_escape_cmd(struct editor *g)
 {
+	/*
+	 * == ESC — return to Normal mode and commit any queued undo entry ==
+	 *
+	 * If already in Normal mode (cmd_mode == 0), signals an error.
+	 * Otherwise clears cmd_mode, commits any open undo queue entry, resets
+	 * the register, and invalidates the status checksum so it redraws.
+	 */
 	if (g->cmd_mode == 0)
 		indicate_error(g);
 	g->cmd_mode = 0;
@@ -340,6 +447,13 @@ run_escape_cmd(struct editor *g)
 static void
 run_match_pair_cmd(struct editor *g)
 {
+	/*
+	 * == % — jump to the bracket that matches the bracket at or after dot ==
+	 *
+	 * Scans right from dot to find the first bracket character on the current
+	 * line, then calls find_pair() to locate its match.  Moves dot there, or
+	 * signals an error if no bracket is found or there is no matching bracket.
+	 */
 	char *p;
 	char *q;
 
@@ -361,18 +475,39 @@ run_match_pair_cmd(struct editor *g)
 static void
 run_undo_last_cmd(struct editor *g)
 {
+	/*
+	 * == u — undo the last modifying command ==
+	 *
+	 * Delegates to undo_with_redo() which pops the undo stack and pushes
+	 * the current state onto the redo stack.
+	 */
 	undo_with_redo(g);
 }
 
 static void
 run_redo_last_cmd(struct editor *g)
 {
+	/*
+	 * == ^R — redo the last undone command ==
+	 *
+	 * Delegates to redo_pop() which pops the redo stack and restores that
+	 * buffer state.
+	 */
 	redo_pop(g);
 }
 
 static void
 run_repeat_last_modifying_cmd(struct editor *g)
 {
+	/*
+	 * == . — repeat the last buffer-modifying command ==
+	 *
+	 * Reconstructs the last command's context (operator, count, register)
+	 * from g->last_cmd_ctx and replays it via do_cmd().  For insert-entering
+	 * commands (a/i/c/…), the captured insert text is queued into ioq_start
+	 * so it replays character by character through the main loop.  The dot-
+	 * repeat count is overridden by any explicit g->cmdcnt set by the user.
+	 */
 	struct cmd_ctx ctx;
 	int c;
 	int pre_modified;
@@ -423,6 +558,13 @@ run_repeat_last_modifying_cmd(struct editor *g)
 static void
 run_undo_line_cmd(struct editor *g)
 {
+	/*
+	 * == U — restore the current line to its state when dot first entered it ==
+	 *
+	 * Replaces the entire current line with the snapshot stored in g->reg[ureg],
+	 * which is updated each time dot moves to a new line.  Leaves dot at the
+	 * first non-blank character.  Does nothing if ureg is empty.
+	 */
 	char *p;
 	char *q;
 
@@ -441,6 +583,14 @@ run_undo_line_cmd(struct editor *g)
 static void
 run_colon_cmd(struct editor *g, const struct cmd_ctx *ctx)
 {
+	/*
+	 * == : — enter and execute a colon (Ex) command ==
+	 *
+	 * If ctx carries a pre-built command string (from a :map binding), runs
+	 * it directly.  In visual mode, leaves visual mode to set the '< '> marks,
+	 * then prompts with ":'<,'>" so s/// acts on the selection.  In normal
+	 * mode, prompts with ":".  Redraws after execution.
+	 */
 	char *p;
 
 	if (ctx && ctx->str) {
@@ -462,6 +612,13 @@ run_colon_cmd(struct editor *g, const struct cmd_ctx *ctx)
 static void
 run_digit_cmd(struct editor *g, int d)
 {
+	/*
+	 * == Accumulate a digit into the command count, or run '0' as a motion ==
+	 *
+	 * If d is 0 and no count is being built (cmdcnt < 1), treats '0' as the
+	 * "go to beginning of line" motion.  Otherwise appends the digit to
+	 * g->cmdcnt for use as a repeat count by the following command.
+	 */
 	if (d == 0 && g->cmdcnt < 1) {
 		dot_begin(g);
 	} else {
@@ -472,6 +629,13 @@ run_digit_cmd(struct editor *g, int d)
 static void
 run_set_mark_cmd(struct editor *g, const struct cmd_ctx *ctx)
 {
+	/*
+	 * == m{a-z} — set a named mark at the current cursor position ==
+	 *
+	 * Reads the mark letter from ctx->anchor (if available) or from the
+	 * input stream.  Stores g->dot into g->mark[letter - 'a'].  Signals
+	 * an error for any character outside a-z.
+	 */
 	int c1;
 
 	c1 = (ctx && ctx->anchor) ? (int)(unsigned char)ctx->anchor : get_one_char(g);
@@ -486,6 +650,15 @@ run_set_mark_cmd(struct editor *g, const struct cmd_ctx *ctx)
 static void
 run_jump_mark_cmd(struct editor *g, char **orig_dot, const struct cmd_ctx *ctx)
 {
+	/*
+	 * == '{a-z} — jump to a named mark ==
+	 *
+	 * For letters a-z: moves dot to the stored mark, goes to beginning of line,
+	 * then skips whitespace.  For '' (double-quote): swaps the current position
+	 * with the saved context mark (the position before the last jump) and also
+	 * updates *orig_dot.  Signals an error for unknown mark letters or if the
+	 * mark points outside the buffer.
+	 */
 	char *q;
 	int c1;
 
@@ -514,6 +687,13 @@ run_jump_mark_cmd(struct editor *g, char **orig_dot, const struct cmd_ctx *ctx)
 static void
 run_delete_key_cmd(struct editor *g)
 {
+	/*
+	 * == DEL key — delete the character under the cursor ==
+	 *
+	 * Deletes the UTF-8 codepoint at dot if dot is not at or past the last
+	 * newline.  Uses yank_delete_current so the deleted text goes into the
+	 * register.
+	 */
 	if (g->dot < g->end - 1 && *g->dot != '\n') {
 		char *start = cp_start(g, g->dot);
 		char *stop = cp_end(g, start) - 1;
@@ -524,6 +704,15 @@ run_delete_key_cmd(struct editor *g)
 static void
 run_g_prefix_cmd(struct editor *g, const struct cmd_ctx *ctx)
 {
+	/*
+	 * == g{x} — dispatch 'g' two-character commands ==
+	 *
+	 * Reads the second character from ctx->op2 or the input stream:
+	 *   gg  — go to first line (sets cmdcnt to 1 if not set)
+	 *   g*  — search for word under cursor without word boundaries
+	 *   g#  — search backward for word under cursor without word boundaries
+	 * Any other second character signals an error and reports not_implemented.
+	 */
 	char buf[3];
 	int c1;
 
@@ -554,6 +743,12 @@ run_g_prefix_cmd(struct editor *g, const struct cmd_ctx *ctx)
 static void
 run_visual_char_mode_cmd(struct editor *g)
 {
+	/*
+	 * == v — toggle characterwise visual mode ==
+	 *
+	 * If already in characterwise visual mode (visual_mode == 1), leaves it.
+	 * Otherwise enters characterwise visual mode.
+	 */
 	if (g->visual_mode == 1)
 		visual_leave(g);
 	else
@@ -563,6 +758,12 @@ run_visual_char_mode_cmd(struct editor *g)
 static void
 run_visual_line_mode_cmd(struct editor *g)
 {
+	/*
+	 * == V — toggle linewise visual mode ==
+	 *
+	 * If already in linewise visual mode (visual_mode == 2), leaves it.
+	 * Otherwise enters linewise visual mode.
+	 */
 	if (g->visual_mode == 2)
 		visual_leave(g);
 	else
@@ -572,6 +773,16 @@ run_visual_line_mode_cmd(struct editor *g)
 static void
 run_zz_cmd(struct editor *g, const struct cmd_ctx *ctx)
 {
+	/*
+	 * == ZZ / ZQ — save and quit, or quit without saving ==
+	 *
+	 * Reads the second character from ctx->op2 or input:
+	 *   ZZ — if modified, writes the file; on success sets editing=0 to exit.
+	 *         If there are more files on the command line, reports the count
+	 *         and stays editing.
+	 *   ZQ — quits without saving by advancing optind past remaining files.
+	 * Any other character signals an error.
+	 */
 	int c1;
 	int cnt;
 	int j;
@@ -613,6 +824,16 @@ run_zz_cmd(struct editor *g, const struct cmd_ctx *ctx)
 static void
 do_put(struct editor *g, int before)
 {
+	/*
+	 * == Core paste implementation shared by P and p ==
+	 *
+	 * Reads the active yank register (syncing from the shared clipboard if
+	 * needed).  For WHOLE (linewise) registers: positions dot at the line
+	 * before (P) or after (p) the current line.  For PARTIAL (characterwise)
+	 * registers: inserts at dot (P) or one character right (p).  Repeats
+	 * g->cmdcnt times, chaining undo entries.  Moves dot to the end of the
+	 * pasted text and resets the register.
+	 */
 	char *p;
 	int allow_undo;
 	int cnt;
@@ -659,18 +880,29 @@ do_put(struct editor *g, int before)
 static void
 run_put_before_cmd(struct editor *g)
 {
+	/*
+	 * == P — paste the register contents before the cursor ==
+	 */
 	do_put(g, 1);
 }
 
 static void
 run_put_after_cmd(struct editor *g)
 {
+	/*
+	 * == p — paste the register contents after the cursor ==
+	 */
 	do_put(g, 0);
 }
 
 static void
 run_paragraph_fwd_cmd(struct editor *g)
 {
+	/*
+	 * == } — move forward to the next paragraph boundary ==
+	 *
+	 * Delegates to motion_run_paragraph_cmd; resets the register on success.
+	 */
 	if (motion_run_paragraph_cmd(g, '}'))
 		reset_ydreg(g);
 }
@@ -678,6 +910,11 @@ run_paragraph_fwd_cmd(struct editor *g)
 static void
 run_paragraph_bck_cmd(struct editor *g)
 {
+	/*
+	 * == { — move backward to the previous paragraph boundary ==
+	 *
+	 * Delegates to motion_run_paragraph_cmd; resets the register on success.
+	 */
 	if (motion_run_paragraph_cmd(g, '{'))
 		reset_ydreg(g);
 }
@@ -685,6 +922,15 @@ run_paragraph_bck_cmd(struct editor *g)
 static void
 do_shift(struct editor *g, const struct cmd_ctx *ctx)
 {
+	/*
+	 * == < / > — indent or de-indent lines covered by a motion or range ==
+	 *
+	 * Resolves the target range with range_find(), then iterates over each
+	 * line: '>' inserts a tab at the start (unless the line is empty), '<'
+	 * removes one leading tab or up to tabstop leading spaces.  All edits
+	 * are chained into one undo entry.  Leaves dot at the first non-blank
+	 * of the first affected line.
+	 */
 	char *p;
 	char *q;
 	int allow_undo;
@@ -722,37 +968,46 @@ do_shift(struct editor *g, const struct cmd_ctx *ctx)
 static void
 scroll_up_page(struct editor *g)
 {
+	/* == ^B / PgUp — scroll up one full page == */
 	dot_scroll(g, g->rows - 2, -1);
 }
 static void
 scroll_dn_half(struct editor *g)
 {
+	/* == ^D — scroll down half a page == */
 	dot_scroll(g, (g->rows - 2) / 2, 1);
 }
 static void
 scroll_dn_line(struct editor *g)
 {
+	/* == ^E — scroll the view down one line without moving dot == */
 	dot_scroll(g, 1, 1);
 }
 static void
 scroll_dn_page(struct editor *g)
 {
+	/* == ^F / PgDn — scroll down one full page == */
 	dot_scroll(g, g->rows - 2, 1);
 }
 static void
 scroll_up_half(struct editor *g)
 {
+	/* == ^U — scroll up half a page == */
 	dot_scroll(g, (g->rows - 2) / 2, -1);
 }
 static void
 scroll_up_line(struct editor *g)
 {
+	/* == ^Y — scroll the view up one line without moving dot == */
 	dot_scroll(g, 1, -1);
 }
 
 static void
 run_search_star_cmd(struct editor *g, const struct cmd_ctx *ctx)
 {
+	/*
+	 * == * — search forward for the word under the cursor (whole-word) ==
+	 */
 	(void)ctx;
 	search_run_word_cmd(g, '*', 1);
 }
@@ -760,6 +1015,9 @@ run_search_star_cmd(struct editor *g, const struct cmd_ctx *ctx)
 static void
 run_search_hash_cmd(struct editor *g, const struct cmd_ctx *ctx)
 {
+	/*
+	 * == # — search backward for the word under the cursor (whole-word) ==
+	 */
 	(void)ctx;
 	search_run_word_cmd(g, '#', 1);
 }
@@ -767,6 +1025,15 @@ run_search_hash_cmd(struct editor *g, const struct cmd_ctx *ctx)
 static int
 dispatch_cmd(struct editor *g, int c, const struct cmd_ctx *ctx)
 {
+	/*
+	 * == Look up and execute a Normal-mode command by key code ==
+	 *
+	 * Handles digit keys (0-9) specially: routes them through run_digit_cmd.
+	 * For all other keys, searches the static cmd_entry table for a matching
+	 * key and calls either fn (simple) or ctx_fn (context-aware) handler.
+	 * Returns 1 if a handler was found and executed, 0 otherwise.
+	 * A synthetic cmd_ctx is constructed when ctx is NULL.
+	 */
 	struct cmd_ctx local_ctx;
 	size_t i;
 
@@ -896,6 +1163,23 @@ dispatch_cmd(struct editor *g, int c, const struct cmd_ctx *ctx)
 void
 do_cmd(struct editor *g, int c, const struct cmd_ctx *ctx)
 {
+	/*
+	 * == Execute one vi command character in the current editing mode ==
+	 *
+	 * The top-level command dispatcher.  Behaviour depends on cmd_mode:
+	 *   2 (replace) — printable bytes overwrite the character at dot
+	 *   1 (insert)  — printable bytes are inserted before dot
+	 *   0 (normal)  — arrow/page keys go directly to dispatch; visual-mode
+	 *                 commands and operator keys are handled inline; all
+	 *                 other keys are routed through dispatch_cmd().
+	 *
+	 * After every command:
+	 *   - Re-inserts the sentinel newline if the buffer is empty.
+	 *   - Clamps dot to valid range.
+	 *   - Calls check_context() if dot moved (updates jump context marks).
+	 *   - Clears cmdcnt unless the key was a digit.
+	 *   - Nudges dot off the trailing newline in Normal mode.
+	 */
 
 	char buf[12];
 	char *orig_dot = g->dot;
@@ -987,7 +1271,7 @@ do_cmd(struct editor *g, int c, const struct cmd_ctx *ctx)
 			}
 			goto dc1;
 		}
-		if (in_set(c, "dcyxpUu")) {
+		if (in_set(c, "dcyxpUu<>")) {
 			visual_apply_operator(g, c);
 			goto dc1;
 		}
@@ -1054,6 +1338,15 @@ dc1:
 static void
 cmd_ctx_from_parser(struct cmd_ctx *ctx, const struct parser *s)
 {
+	/*
+	 * == Populate a cmd_ctx from a completed parser state ==
+	 *
+	 * Extracts register, counts, operator, second operator, range count,
+	 * range character, anchor, inline string, and raw key from the parser
+	 * struct.  count and rcount default to 1 when the parser accumulated
+	 * no digits, matching the "no explicit count" convention expected by
+	 * command handlers.
+	 */
 	ctx->reg = s->reg;
 	ctx->count = s->m ? s->m : 1;
 	ctx->op = s->op;
@@ -1068,6 +1361,27 @@ cmd_ctx_from_parser(struct cmd_ctx *ctx, const struct parser *s)
 void
 edit_file(struct editor *g, char *fn)
 {
+	/*
+	 * == Open fn and run the interactive edit loop until :q / ZZ ==
+	 *
+	 * Initialises raw mode, queries terminal dimensions, allocates the screen
+	 * shadow buffer, and loads fn into the text buffer.  Installs signal
+	 * handlers (SIGWINCH, SIGTSTP, SIGINT) and sets the sigsetjmp restart
+	 * point so ^C can abort any in-progress command.
+	 *
+	 * Main loop (while editing > 0):
+	 *   1. Process any deferred signals.
+	 *   2. Read one character (from ioq_start replay queue or terminal).
+	 *   3. Snapshot the current line for 'U' undo if dot moved to a new line.
+	 *   4. Handle visual-mode prefix sequences ('"', '+', 'a'/'i') inline.
+	 *   5. In Normal mode, feed the character through the MONRAS parser.
+	 *      When complete: extract cmd_ctx and call do_cmd().
+	 *   6. In Insert/Replace mode, bypass the parser and call do_cmd() directly.
+	 *   7. Refresh the screen and status line (skipped if input is queued).
+	 *
+	 * On exit, moves the cursor to the bottom of the screen and restores
+	 * cooked terminal mode.
+	 */
 	int c;
 	int sig;
 
@@ -1302,6 +1616,14 @@ edit_file(struct editor *g, char *fn)
 int
 main(int argc, char **argv)
 {
+	/*
+	 * == Program entry point: parse CLI options and start the editor session ==
+	 *
+	 * Initialises the global editor state, parses command-line options
+	 * (including -c, -R, -s flags and initial file list), then hands off
+	 * to run_editor_session() which calls edit_file() for each file.
+	 * Returns 0 on normal exit, 1 if option parsing fails.
+	 */
 	struct editor *g = &vi_g;
 	struct cli_options opts;
 	int arg_index;

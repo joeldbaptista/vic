@@ -20,6 +20,19 @@
 uintptr_t
 text_hole_make(struct editor *g, char *p, int size)
 {
+	/*
+	 * == Open a gap of `size` bytes at position p ==
+	 *
+	 * Grows the backing allocation if needed (doubling up to 1 MB, then
+	 * 1 MB steps), adjusts all interior pointers (dot, screenbegin, end,
+	 * marks) by the realloc bias, and memmoves existing content to make
+	 * room.
+	 *
+	 * - Returns the bias (new_text - old_text); callers that hold a
+	 *   pointer into the old allocation must add this value to it.
+	 * - All callers that insert text follow this with a memcpy/assignment
+	 *   into the freshly opened bytes.
+	 */
 	char *new_text;
 	int i;
 	uintptr_t bias = 0;
@@ -60,6 +73,18 @@ text_hole_make(struct editor *g, char *p, int size)
 char *
 text_hole_delete(struct editor *g, char *p, char *q, int undo)
 {
+	/*
+	 * == Delete the byte range [p, q] (inclusive) from the buffer ==
+	 *
+	 * Pushes an undo record according to the `undo` flag before removing
+	 * content, then memmoves subsequent bytes down to close the gap.
+	 * Handles reversed p/q automatically.
+	 *
+	 * - Returns the new position of what was p after the deletion.
+	 * - Callers that hold other pointers into the buffer must re-derive
+	 *   them after this call (no bias return; the allocation does not
+	 *   change size, only content shifts).
+	 */
 	char *src;
 	char *dest;
 	int cnt;
@@ -108,6 +133,16 @@ thd0:
 int
 file_insert(struct editor *g, const char *fn, char *p, int initial)
 {
+	/*
+	 * == Read a file into the buffer at position p ==
+	 *
+	 * Opens fn, stats it to get the size, calls text_hole_make to reserve
+	 * space, then reads the file content in.  On the initial load (initial
+	 * = 1) also sets g->readonly_mode when the file is not writable.
+	 *
+	 * - Returns the byte count inserted, or -1 on failure.
+	 * - Errors are reported via status_line_bold and the hole is collapsed.
+	 */
 	int cnt = -1;
 	int fd;
 	int size;
@@ -158,6 +193,13 @@ fi:
 static uintptr_t
 stupid_insert(struct editor *g, char *p, char c)
 {
+	/*
+	 * == Insert a single byte c at position p ==
+	 *
+	 * Thin wrapper: opens a 1-byte hole via text_hole_make and writes c
+	 * into it.  Returns the realloc bias for callers that need to adjust
+	 * their pointers.  Does not record an undo entry.
+	 */
 	uintptr_t bias;
 
 	bias = text_hole_make(g, p, 1);
@@ -169,6 +211,22 @@ stupid_insert(struct editor *g, char *p, char c)
 char *
 char_insert(struct editor *g, char *p, char c, int undo)
 {
+	/*
+	 * == Insert one character from INSERT/REPLACE mode ==
+	 *
+	 * Handles all the special cases that arise during interactive typing:
+	 * - Ctrl-V: literal next character (bypasses special handling).
+	 * - ESC:    commits the undo queue, exits insert mode, strips trailing
+	 *           autoindent whitespace from blank lines.
+	 * - Ctrl-D: de-indents one tab stop (used in insert mode).
+	 * - Tab:    expands to spaces when expandtab is set.
+	 * - Backspace/DEL: deletes the preceding character, or (in REPLACE
+	 *   mode) pops the undo stack to restore the overwritten byte.
+	 * - '\n':   commits the undo queue then auto-indents the new line.
+	 * - Other:  inserts the byte, optionally shows a matching bracket.
+	 *
+	 * - Returns the new value of p (after insertion the pointer shifts).
+	 */
 	size_t len;
 	int col;
 	int ntab;
@@ -281,6 +339,13 @@ char_insert(struct editor *g, char *p, char c, int undo)
 void
 init_filename(struct editor *g, char *fn)
 {
+	/*
+	 * == Set the current filename for the first time ==
+	 *
+	 * If g->current_filename is NULL, sets it to fn.  Otherwise pushes fn
+	 * into g->alt_filename (the '#' register), discarding the old
+	 * alternate.  Used when opening the very first file.
+	 */
 	char *copy = xstrdup(fn);
 
 	if (g->current_filename == NULL) {
@@ -294,6 +359,13 @@ init_filename(struct editor *g, char *fn)
 void
 update_filename(struct editor *g, char *fn)
 {
+	/*
+	 * == Update the current filename, preserving the previous as alternate ==
+	 *
+	 * When fn differs from g->current_filename, the old name becomes
+	 * g->alt_filename (the '#' register) and fn becomes current.
+	 * No-op when fn is NULL or matches the current name.
+	 */
 	if (fn == NULL)
 		return;
 
@@ -307,6 +379,17 @@ update_filename(struct editor *g, char *fn)
 int
 init_text_buffer(struct editor *g, char *fn)
 {
+	/*
+	 * == Initialise the text buffer for a new file ==
+	 *
+	 * Frees any previous buffer, allocates a fresh 10 KB slab, loads fn
+	 * via file_insert (ensuring the buffer always ends with '\n'), flushes
+	 * undo history, resets the modified count and cache stamps, and clears
+	 * all marks.  Loads the persistent undo sidecar last (undo_load).
+	 *
+	 * - Returns the byte count from file_insert, or <= 0 on a new/empty
+	 *   file.
+	 */
 	int rc;
 
 	free(g->text);
@@ -333,6 +416,14 @@ init_text_buffer(struct editor *g, char *fn)
 uintptr_t
 string_insert(struct editor *g, char *p, const char *s, int undo)
 {
+	/*
+	 * == Insert a NUL-terminated string at position p ==
+	 *
+	 * Records one undo entry for the entire string, opens a gap via
+	 * text_hole_make, and memcpys s into it.
+	 *
+	 * - Returns the realloc bias; callers must adjust any stale pointers.
+	 */
 	uintptr_t bias;
 	int i;
 
@@ -348,6 +439,16 @@ string_insert(struct editor *g, char *p, const char *s, int undo)
 int
 file_write(struct editor *g, char *fn, char *first, char *last)
 {
+	/*
+	 * == Write a buffer range to disk ==
+	 *
+	 * Opens (or creates) fn, writes [first, last] inclusive, truncates
+	 * the file to the written length (handles overwrites of shorter
+	 * content), and saves the undo sidecar on success.
+	 *
+	 * - Returns byte count written, -2 if fn is NULL, -1 on open error,
+	 *   0 when the write was short (disk full).
+	 */
 	int fd;
 	int cnt;
 	int charcnt;

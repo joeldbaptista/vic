@@ -26,6 +26,12 @@
 void
 dot_left(struct editor *g)
 {
+	/*
+	 * == Move cursor left one codepoint ==
+	 *
+	 * Commits any pending undo queue, then retreats dot by one codepoint.
+	 * Does not cross the preceding newline (stays on the current line).
+	 */
 	undo_queue_commit(g);
 	g->dot = cp_start(g, g->dot);
 	if (g->dot > g->text && g->dot[-1] != '\n')
@@ -35,6 +41,12 @@ dot_left(struct editor *g)
 void
 dot_right(struct editor *g)
 {
+	/*
+	 * == Move cursor right one codepoint ==
+	 *
+	 * Commits any pending undo queue, then advances dot by one codepoint.
+	 * Does not cross the trailing newline of the current line.
+	 */
 	undo_queue_commit(g);
 	g->dot = cp_start(g, g->dot);
 	if (g->dot < g->end - 1 && *g->dot != '\n')
@@ -44,6 +56,9 @@ dot_right(struct editor *g)
 void
 dot_begin(struct editor *g)
 {
+	/*
+	 * == Move cursor to the first byte of the current line ==
+	 */
 	undo_queue_commit(g);
 	g->dot = begin_line(g, g->dot);
 }
@@ -51,6 +66,9 @@ dot_begin(struct editor *g)
 void
 dot_end(struct editor *g)
 {
+	/*
+	 * == Move cursor to the newline terminating the current line ==
+	 */
 	undo_queue_commit(g);
 	g->dot = end_line(g, g->dot);
 }
@@ -58,6 +76,16 @@ dot_end(struct editor *g)
 char *
 move_to_col(struct editor *g, char *p, int l)
 {
+	/*
+	 * == Walk p to the target column l on its line ==
+	 *
+	 * Starting from begin_line, advances codepoint by codepoint and stops
+	 * at the last position whose column does not exceed l.  Handles tabs
+	 * and wide codepoints correctly via next_column.
+	 *
+	 * - Never overshoots into the trailing newline.
+	 * - Returns the closest reachable position when l is past end-of-line.
+	 */
 	int co;
 
 	p = begin_line(g, p);
@@ -83,6 +111,9 @@ move_to_col(struct editor *g, char *p, int l)
 void
 dot_next(struct editor *g)
 {
+	/*
+	 * == Move cursor to the start of the next line ==
+	 */
 	undo_queue_commit(g);
 	g->dot = next_line(g, g->dot);
 }
@@ -90,6 +121,9 @@ dot_next(struct editor *g)
 void
 dot_prev(struct editor *g)
 {
+	/*
+	 * == Move cursor to the start of the previous line ==
+	 */
 	undo_queue_commit(g);
 	g->dot = prev_line(g, g->dot);
 }
@@ -97,6 +131,13 @@ dot_prev(struct editor *g)
 char *
 next_empty_line(struct editor *g, char *p)
 {
+	/*
+	 * == Pointer to the next empty line after p ==
+	 *
+	 * An empty line is one whose only byte is '\n'.  Used by the }
+	 * paragraph-forward motion.  Returns NULL when no empty line exists
+	 * after p.
+	 */
 	p = next_line(g, p);
 	while (p < g->end && *p != '\n') {
 		char *n = next_line(g, p);
@@ -112,6 +153,13 @@ next_empty_line(struct editor *g, char *p)
 char *
 prev_empty_line(struct editor *g, char *p)
 {
+	/*
+	 * == Pointer to the previous empty line before p ==
+	 *
+	 * An empty line is one whose only byte is '\n'.  Used by the {
+	 * paragraph-backward motion.  Returns NULL when no empty line exists
+	 * before p.
+	 */
 	p = prev_line(g, p);
 	while (p >= g->text && *p != '\n') {
 		char *n = prev_line(g, p);
@@ -127,6 +175,13 @@ prev_empty_line(struct editor *g, char *p)
 void
 dot_skip_over_ws(struct editor *g)
 {
+	/*
+	 * == Advance dot past any leading ASCII whitespace ==
+	 *
+	 * Steps dot forward over space/tab characters, stopping before
+	 * newlines and non-whitespace.  Called after line-motion commands to
+	 * land the cursor on the first non-blank column.
+	 */
 	while (g->dot < g->end - 1) {
 		unsigned char c = (unsigned char)*g->dot;
 
@@ -139,6 +194,18 @@ dot_skip_over_ws(struct editor *g)
 void
 dot_to_char(struct editor *g, int cmd)
 {
+	/*
+	 * == Move dot to the next/previous occurrence of g->last_search_char ==
+	 *
+	 * Implements f, F, t, T (and their ; / , repeats within a line).
+	 * dir = 1 for f/t (forward), -1 for F/T (backward).  Does not cross
+	 * newlines.  After finding the character:
+	 * - f/F: lands on the matching byte.
+	 * - t:   steps back one codepoint (stops just before the char).
+	 * - T:   steps forward one codepoint (stops just after the char).
+	 *
+	 * - Calls indicate_error when the character is not found on the line.
+	 */
 	char *q = cp_start(g, g->dot);
 	int dir = islower(cmd) ? 1 : -1;
 
@@ -184,18 +251,33 @@ dot_to_char(struct editor *g, int cmd)
 void
 motion_run_repeat_search_same_cmd(struct editor *g)
 {
+	/*
+	 * == Repeat last f/F/t/T search in the same direction (;) ==
+	 */
 	dot_to_char(g, g->last_search_cmd);
 }
 
 void
 motion_run_repeat_search_reverse_cmd(struct editor *g)
 {
+	/*
+	 * == Repeat last f/F/t/T search in the opposite direction (,) ==
+	 *
+	 * XOR 0x20 flips the case bit to swap f<->F and t<->T.
+	 */
 	dot_to_char(g, g->last_search_cmd ^ 0x20);
 }
 
 void
 motion_run_find_char_cmd(struct editor *g, const struct cmd_ctx *ctx)
 {
+	/*
+	 * == Execute an f/F/t/T command ==
+	 *
+	 * Reads the target character from ctx->anchor (when available from the
+	 * parser) or from the terminal interactively.  Saves it in
+	 * g->last_search_char for ; / , repeats, then delegates to dot_to_char.
+	 */
 	if (ctx && ctx->anchor)
 		g->last_search_char = (unsigned char)ctx->anchor;
 	else
@@ -207,6 +289,9 @@ motion_run_find_char_cmd(struct editor *g, const struct cmd_ctx *ctx)
 void
 motion_run_first_nonblank_cmd(struct editor *g)
 {
+	/*
+	 * == Move to the first non-blank character on the current line (^) ==
+	 */
 	dot_begin(g);
 	dot_skip_over_ws(g);
 }
@@ -214,6 +299,11 @@ motion_run_first_nonblank_cmd(struct editor *g)
 void
 motion_run_screen_top_cmd(struct editor *g)
 {
+	/*
+	 * == Move to the top of the visible screen window (H) ==
+	 *
+	 * Supports a count: 3H moves to the 3rd line from the top.
+	 */
 	g->dot = g->screenbegin;
 	if (g->cmdcnt > (int)(g->rows - 1))
 		g->cmdcnt = (int)(g->rows - 1);
@@ -226,6 +316,11 @@ motion_run_screen_top_cmd(struct editor *g)
 void
 motion_run_screen_bottom_cmd(struct editor *g)
 {
+	/*
+	 * == Move to the bottom of the visible screen window (L) ==
+	 *
+	 * Supports a count: 3L moves to the 3rd line from the bottom.
+	 */
 	g->dot = end_screen(g);
 	if (g->cmdcnt > (int)(g->rows - 1))
 		g->cmdcnt = (int)(g->rows - 1);
@@ -238,6 +333,9 @@ motion_run_screen_bottom_cmd(struct editor *g)
 void
 motion_run_screen_middle_cmd(struct editor *g)
 {
+	/*
+	 * == Move to the middle line of the visible screen window (M) ==
+	 */
 	int cnt;
 
 	g->dot = g->screenbegin;
@@ -249,12 +347,22 @@ motion_run_screen_middle_cmd(struct editor *g)
 void
 motion_run_goto_column_cmd(struct editor *g)
 {
+	/*
+	 * == Move to column g->cmdcnt on the current line (|) ==
+	 */
 	g->dot = move_to_col(g, g->dot, g->cmdcnt - 1);
 }
 
 void
 motion_run_goto_line_cmd(struct editor *g)
 {
+	/*
+	 * == Go to line g->cmdcnt, or last line when count is zero (G) ==
+	 *
+	 * With no count: jumps to the last line of the buffer.
+	 * With a count n: jumps to line n (1-based), landing on the first
+	 * non-blank character.
+	 */
 	g->dot = g->end - 1;
 	if (g->cmdcnt > 0)
 		g->dot = find_line(g, g->cmdcnt);
@@ -265,6 +373,9 @@ motion_run_goto_line_cmd(struct editor *g)
 void
 motion_run_left_cmd(struct editor *g)
 {
+	/*
+	 * == Move cursor left g->cmdcnt codepoints (h) ==
+	 */
 	do {
 		dot_left(g);
 	} while (--g->cmdcnt > 0);
@@ -273,6 +384,9 @@ motion_run_left_cmd(struct editor *g)
 void
 motion_run_right_cmd(struct editor *g)
 {
+	/*
+	 * == Move cursor right g->cmdcnt codepoints (l / Space) ==
+	 */
 	do {
 		dot_right(g);
 	} while (--g->cmdcnt > 0);
@@ -281,6 +395,12 @@ motion_run_right_cmd(struct editor *g)
 void
 motion_run_prev_empty_line_cmd(struct editor *g)
 {
+	/*
+	 * == Move to the previous paragraph boundary ({) ==
+	 *
+	 * Jumps g->cmdcnt empty lines backward.  Calls indicate_error and
+	 * returns early when no more empty lines exist.
+	 */
 	char *p;
 	char *q = g->dot;
 
@@ -299,6 +419,12 @@ motion_run_prev_empty_line_cmd(struct editor *g)
 void
 motion_run_next_empty_line_cmd(struct editor *g)
 {
+	/*
+	 * == Move to the next paragraph boundary (}) ==
+	 *
+	 * Jumps g->cmdcnt empty lines forward.  Calls indicate_error and
+	 * returns early when no more empty lines exist.
+	 */
 	char *p;
 	char *q = g->dot;
 
@@ -317,6 +443,13 @@ motion_run_next_empty_line_cmd(struct editor *g)
 void
 motion_run_next_line_keep_col_cmd(struct editor *g)
 {
+	/*
+	 * == Move to the next line, preserving the column index (Ctrl-J) ==
+	 *
+	 * Unlike j, this variant restores the saved column (g->cindex) rather
+	 * than skipping leading whitespace.  Used to implement Ctrl-J / linefeed
+	 * motions that maintain horizontal position.
+	 */
 	char *p;
 	char *q = g->dot;
 
@@ -338,6 +471,9 @@ motion_run_next_line_keep_col_cmd(struct editor *g)
 void
 motion_run_next_line_skip_ws_cmd(struct editor *g)
 {
+	/*
+	 * == Move to the next line, landing on the first non-blank (j / CR) ==
+	 */
 	char *p;
 	char *q = g->dot;
 
@@ -357,6 +493,9 @@ motion_run_next_line_skip_ws_cmd(struct editor *g)
 void
 motion_run_prev_line_skip_ws_cmd(struct editor *g)
 {
+	/*
+	 * == Move to the previous line, landing on the first non-blank (k / -) ==
+	 */
 	char *p;
 	char *q = g->dot;
 
@@ -376,6 +515,12 @@ motion_run_prev_line_skip_ws_cmd(struct editor *g)
 void
 motion_run_line_end_cmd(struct editor *g)
 {
+	/*
+	 * == Move to the end of the current line ($) ==
+	 *
+	 * Supports a count: 3$ moves to the end of the 3rd line below.
+	 * Sets g->cindex = -1 so subsequent j/k motions stay at end-of-line.
+	 */
 	for (;;) {
 		g->dot = end_line(g, g->dot);
 		if (--g->cmdcnt <= 0)
@@ -389,6 +534,17 @@ motion_run_line_end_cmd(struct editor *g)
 int
 motion_run_paragraph_cmd(struct editor *g, int c)
 {
+	/*
+	 * == Move to the next/previous paragraph boundary (} / {) ==
+	 *
+	 * A paragraph boundary is a pair of consecutive newlines ('\n\n').
+	 * The scan skips adjacent blank lines so the cursor lands just past
+	 * (forward) or just before (backward) the blank-line separator.
+	 *
+	 * - c == '}': forward; any other value: backward.
+	 * - Returns 1 when no boundary was found (caller sets error), 0 on
+	 *   success.
+	 */
 	int dir;
 
 	dir = c == '}' ? 1 : -1;
@@ -419,6 +575,13 @@ motion_run_paragraph_cmd(struct editor *g, int c)
 void
 motion_run_scroll_to_screenpos_cmd(struct editor *g, const struct cmd_ctx *ctx)
 {
+	/*
+	 * == Redraw so the current line is at a screen position (z) ==
+	 *
+	 * Second key selects the position: 't' or CR = top, '.' = middle,
+	 * '-' or 'b' = bottom.  Reads the second key from ctx->op2 (parser
+	 * path) or interactively from the terminal.
+	 */
 	int c1;
 	int cnt = 0;
 
@@ -434,6 +597,13 @@ motion_run_scroll_to_screenpos_cmd(struct editor *g, const struct cmd_ctx *ctx)
 void
 dot_scroll(struct editor *g, int cnt, int dir)
 {
+	/*
+	 * == Scroll the view cnt lines in direction dir ==
+	 *
+	 * Moves g->screenbegin forward (dir > 0) or backward (dir < 0) by cnt
+	 * lines, then clamps g->dot to stay within the visible window.
+	 * Used by Ctrl-E/Y and the z scroll commands.
+	 */
 	char *q;
 
 	undo_queue_commit(g);
@@ -454,6 +624,13 @@ dot_scroll(struct editor *g, int cnt, int dir)
 char *
 bound_dot(struct editor *g, char *p)
 {
+	/*
+	 * == Clamp p to a valid buffer position ==
+	 *
+	 * Ensures p is within [g->text, g->end - 1] and snapped to a codepoint
+	 * start.  Calls indicate_error when clamping was necessary.
+	 * Used at operator-range boundaries to prevent out-of-bounds access.
+	 */
 	if (p >= g->end && g->end > g->text) {
 		p = g->end - 1;
 		indicate_error(g);

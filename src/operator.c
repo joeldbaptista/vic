@@ -37,6 +37,12 @@ enum {
 static void
 shared_yank_path(char *buf, size_t size)
 {
+	/*
+	 * == Build the filesystem path for the shared (+) yank register ==
+	 *
+	 * Uses $XDG_CACHE_HOME/vic/yank if set, otherwise $HOME/.cache/vic/yank.
+	 * Writes into buf (size bytes).
+	 */
 	const char *base;
 	const char *home;
 
@@ -54,6 +60,12 @@ shared_yank_path(char *buf, size_t size)
 static void
 shared_yank_out(struct editor *g)
 {
+	/*
+	 * == Persist the shared register (+) to the yank-file on disk ==
+	 *
+	 * Creates the parent directories if necessary, then writes the full
+	 * register contents.  Errors are silently ignored (best-effort).
+	 */
 	char path[PATH_MAX];
 	char dir[PATH_MAX];
 	char *sep;
@@ -88,6 +100,13 @@ shared_yank_out(struct editor *g)
 void
 shared_yank_in(struct editor *g)
 {
+	/*
+	 * == Load the shared (+) register from the yank-file on disk ==
+	 *
+	 * Reads the file written by shared_yank_out (or a compatible tool
+	 * such as xclip).  Sets regtype based on whether the content contains
+	 * newlines.  No-op if the file does not exist.
+	 */
 	char path[PATH_MAX];
 	char *content;
 	size_t len;
@@ -109,6 +128,13 @@ shared_yank_in(struct editor *g)
 static void
 yank_sync_out(struct editor *g)
 {
+	/*
+	 * == Write the current register to a per-session temp file ==
+	 *
+	 * The temp file lives at /tmp/vic-<epoch>.dat and lets ex commands
+	 * (e.g. :put) read the current register without going through a pipe.
+	 * Errors are silently ignored.
+	 */
 	char path[64];
 	const char *s = g->reg[g->ydreg];
 	int fd;
@@ -126,6 +152,13 @@ yank_sync_out(struct editor *g)
 void
 yank_sync_in(struct editor *g)
 {
+	/*
+	 * == Load the current register from the per-session temp file ==
+	 *
+	 * Counterpart to yank_sync_out: reads /tmp/vic-<epoch>.dat back into
+	 * the active register.  Used when ex commands place text there for
+	 * later :put.  No-op if the file does not exist.
+	 */
 	char path[64];
 	char *content;
 	size_t len;
@@ -147,6 +180,14 @@ yank_sync_in(struct editor *g)
 char *
 text_yank(struct editor *g, char *p, char *q, int dest, int buftype)
 {
+	/*
+	 * == Copy text [p, q] into register dest ==
+	 *
+	 * Allocates a NUL-terminated copy, sets regtype, frees the previous
+	 * content, and writes through to the yank-file for the shared (+) and
+	 * current ydreg registers.  Returns p (the normalised start pointer).
+	 * Handles reversed p/q by swapping them.
+	 */
 	char *oldreg = g->reg[dest];
 	int cnt = q - p;
 
@@ -169,6 +210,12 @@ text_yank(struct editor *g, char *p, char *q, int dest, int buftype)
 char
 what_reg(const struct editor *g)
 {
+	/*
+	 * == Return the display character for the current yank/delete register ==
+	 *
+	 * SHARED_REG → '+', a–z named registers → the letter,
+	 * ureg → 'U', unnamed → 'D'.
+	 */
 	if (g->ydreg == SHARED_REG)
 		return '+';
 	if (g->ydreg <= 25)
@@ -181,6 +228,11 @@ what_reg(const struct editor *g)
 void
 yank_status(struct editor *g, const char *op, const char *p, int cnt)
 {
+	/*
+	 * == Display "Yank N lines (M chars) from [reg]" on the status line ==
+	 *
+	 * cnt is a repeat multiplier (from the operator count).
+	 */
 	int lines;
 	int chars;
 
@@ -199,6 +251,14 @@ char *
 yank_delete(struct editor *g, char *start, char *stop, int buftype,
             int do_delete, int undo, int dest_reg)
 {
+	/*
+	 * == Yank, and optionally delete, text [start, stop] into dest_reg ==
+	 *
+	 * do_delete=1 deletes via text_hole_delete after yanking; 0 is yank-only.
+	 * Normalises start/stop order.  No-op for PARTIAL selections starting on
+	 * a newline (boundary condition for empty lines).
+	 * Returns the new dot after deletion, or start for yank-only.
+	 */
 	char *p;
 
 	if (start > stop) {
@@ -220,12 +280,31 @@ char *
 yank_delete_current(struct editor *g, char *start, char *stop,
                     int buftype, int yf, int undo)
 {
+	/*
+	 * == Yank/delete into the active ydreg register ==
+	 *
+	 * Thin wrapper around yank_delete() that passes g->ydreg as the
+	 * destination register.  yf=YANKDEL deletes; yf=YANKONLY yanks only.
+	 */
 	return yank_delete(g, start, stop, buftype, yf == YANKDEL, undo, g->ydreg);
 }
 
 void
 operator_run_change_delete_yank_cmd(struct editor *g, const struct cmd_ctx *ctx)
 {
+	/*
+	 * == Execute c, d, y, Y, and case operators (gU, gu, ~) ==
+	 *
+	 * Calls range_find() to resolve the motion, then yanks/deletes the
+	 * region.  For whole-line ranges (buftype=WHOLE), expands to full line
+	 * boundaries.  After deletion:
+	 *   c  — opens a blank insert line and enters INSERT mode
+	 *   d  — moves dot to first non-blank of the next line
+	 *   y  — leaves dot at original position
+	 *
+	 * For case operators (gU, gu) range_find is not called; the caller
+	 * pre-positions the range.
+	 */
 	int c = (int)(unsigned char)ctx->op;
 	int yf = YANKDEL;
 	int buftype;
@@ -280,6 +359,14 @@ operator_run_change_delete_yank_cmd(struct editor *g, const struct cmd_ctx *ctx)
 void
 operator_run_delete_or_substitute_cmd(struct editor *g, const struct cmd_ctx *ctx)
 {
+	/*
+	 * == Execute x (delete char under cursor), X (delete before), and s (substitute) ==
+	 *
+	 * Deletes one codepoint per g->cmdcnt repetition.  x skips newlines
+	 * (can't delete past EOL); X skips if dot is at the start of a line.
+	 * s deletes then enters INSERT mode (like c<space>).  All deletions
+	 * are chained into a single undo unit.
+	 */
 	int c = (int)(unsigned char)ctx->op;
 	int allow_undo = ALLOW_UNDO;
 
@@ -309,6 +396,12 @@ operator_run_delete_or_substitute_cmd(struct editor *g, const struct cmd_ctx *ct
 void
 operator_run_change_or_delete_eol_cmd(struct editor *g, const struct cmd_ctx *ctx)
 {
+	/*
+	 * == Execute C (change to EOL) and D (delete to EOL) ==
+	 *
+	 * Yanks and deletes from dot to the last character of the line
+	 * (dollar_line position).  C enters INSERT mode; D resets the register.
+	 */
 	int c = (int)(unsigned char)ctx->op;
 	char *save_dot;
 
@@ -324,6 +417,15 @@ operator_run_change_or_delete_eol_cmd(struct editor *g, const struct cmd_ctx *ct
 void
 operator_run_replace_char_cmd(struct editor *g, const struct cmd_ctx *ctx)
 {
+	/*
+	 * == Execute r — replace character(s) without entering INSERT mode ==
+	 *
+	 * Reads one character (from ctx->anchor if pre-parsed, else from
+	 * the terminal).  Replaces each character under dot by deleting it
+	 * and inserting the new character, g->cmdcnt times, chained into one
+	 * undo unit.  Rejects replacements that would run past the end of
+	 * the line.
+	 */
 	int c1;
 	int allow_undo = ALLOW_UNDO;
 
@@ -351,6 +453,13 @@ operator_run_replace_char_cmd(struct editor *g, const struct cmd_ctx *ctx)
 void
 operator_run_flip_case_cmd(struct editor *g)
 {
+	/*
+	 * == Execute ~ — toggle the case of the character under the cursor ==
+	 *
+	 * Operates on ASCII letters only (UTF-8 multibyte bytes are skipped).
+	 * Each character is toggled by a delete+insert pair recorded into the
+	 * undo chain.  Repeats g->cmdcnt times.
+	 */
 	int undo_del = UNDO_DEL;
 
 	do {

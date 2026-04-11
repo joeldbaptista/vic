@@ -48,6 +48,20 @@ is_ascii_punct(unsigned char c)
 static int
 st_test(struct editor *g, char *p, int type, int dir, char *tested)
 {
+	/*
+	 * == Test whether a scan should continue from p ==
+	 *
+	 * Selects the character to test (current byte or adjacent, depending
+	 * on type and dir) and returns non-zero while the scan should step.
+	 * Writes the tested character into *tested for the newline line-count
+	 * check in skip_thing.
+	 *
+	 * - S_BEFORE_WS: continue while the adjacent byte is non-whitespace.
+	 * - S_TO_WS:     continue while the current byte is non-whitespace.
+	 * - S_OVER_WS:   continue while the current byte is whitespace.
+	 * - S_END_PUNCT: continue while the adjacent byte is ASCII punctuation.
+	 * - S_END_ALNUM: continue while the adjacent byte is alphanumeric/_.
+	 */
 	char c;
 	unsigned char c0;
 	unsigned char ci;
@@ -94,6 +108,17 @@ st_test(struct editor *g, char *p, int type, int dir, char *tested)
 char *
 skip_thing(struct editor *g, char *p, int linecnt, int dir, int type)
 {
+	/*
+	 * == Step p forward/backward by scan type ==
+	 *
+	 * Repeatedly calls st_test and moves p one codepoint in direction dir
+	 * until the test fails or linecnt newlines have been crossed.
+	 * This is the primitive used by all word-motion commands.
+	 *
+	 * - linecnt limits how many line boundaries may be crossed (typically
+	 *   1 for intra-line scans, 2 for whitespace-skip passes).
+	 * - dir > 0 = forward (cp_next), dir < 0 = backward (cp_prev).
+	 */
 	char c;
 
 	while (st_test(g, p, type, dir, &c)) {

@@ -30,10 +30,15 @@ static const struct colorizer *const colorizer_table[] = {
     NULL,
 };
 
-/* Case-insensitive extension comparison (extensions include leading dot). */
 static int
 ext_match(const char *a, const char *b)
 {
+	/*
+	 * == Case-insensitive comparison of two file extension strings ==
+	 *
+	 * Both a and b must include the leading dot (e.g. ".c", ".C").
+	 * Returns 1 if they are identical under tolower(), 0 otherwise.
+	 */
 	while (*a && *b) {
 		if (tolower((unsigned char)*a) != tolower((unsigned char)*b))
 			return 0;
@@ -46,6 +51,14 @@ ext_match(const char *a, const char *b)
 const struct colorizer *
 colorizer_find(const char *filename)
 {
+	/*
+	 * == Find the colorizer for a file, based on its extension ==
+	 *
+	 * Extracts the last '.' component of filename and does a linear scan
+	 * through colorizer_table, testing each colorizer's extensions[] list.
+	 * Returns a pointer to the matching colorizer, or NULL if none matches
+	 * or filename has no extension.
+	 */
 	const char *ext;
 	int i;
 

@@ -20,6 +20,13 @@
 static int
 read_byte_timeout(int fd, unsigned char *out, int timeout_ms)
 {
+	/*
+	 * == Read one byte from fd with a millisecond timeout ==
+	 *
+	 * Returns 1 if a byte was read, 0 on timeout (errno = EAGAIN), -1 on
+	 * error.  Used to read escape sequence continuations with a short
+	 * timeout so a bare ESC is not confused with the start of a sequence.
+	 */
 	struct pollfd pfd;
 	int pr;
 	ssize_t r;
@@ -42,12 +49,25 @@ read_byte_timeout(int fd, unsigned char *out, int timeout_ms)
 static int
 is_csi_final_byte(unsigned char c)
 {
+	/*
+	 * == True if c is a CSI final byte (0x40–0x7E) ==
+	 *
+	 * CSI sequences end at the first byte in this range; bytes before it
+	 * are parameter or intermediate bytes.
+	 */
 	return c >= CSI_FINAL_BYTE_MIN && c <= CSI_FINAL_BYTE_MAX;
 }
 
 static int
 parse_csi_params(const char *s, int *params, int max_params)
 {
+	/*
+	 * == Parse semicolon-separated integer parameters from a CSI string ==
+	 *
+	 * s is the parameter string (everything between ESC[ and the final
+	 * byte).  Fills params[] with up to max_params values and returns the
+	 * count.  Missing (empty) fields are stored as 0.
+	 */
 	int count = 0;
 	int value = -1;
 
@@ -78,6 +98,23 @@ parse_csi_params(const char *s, int *params, int max_params)
 uint64_t
 safe_read_key(int fd, char *buffer, int timeout_ms)
 {
+	/*
+	 * == Read one keystroke and decode it into a KEYCODE_* value ==
+	 *
+	 * Reads one byte with timeout_ms timeout.  Plain characters are
+	 * returned as-is.  ESC followed by [ or O triggers escape-sequence
+	 * decoding using an 80 ms inter-byte timeout to distinguish bare ESC
+	 * from an ANSI/VT sequence.
+	 *
+	 * - CSI sequences (ESC [): parsed for cursor keys, navigation keys,
+	 *   bracketed paste markers, and CPR responses.
+	 * - SS3 sequences (ESC O): cursor and home/end keys.
+	 * - Unrecognised sequences fall back to returning ASCII_ESC.
+	 * - buffer receives any extra character following the ESC when the
+	 *   second byte is not [ or O (Meta-key pass-through).
+	 *
+	 * Returns (uint64_t)-1 on timeout or read error.
+	 */
 	unsigned char ch;
 	unsigned char c1;
 	unsigned char c2;
@@ -210,6 +247,15 @@ safe_read_key(int fd, char *buffer, int timeout_ms)
 int
 readit(struct editor *g)
 {
+	/*
+	 * == Read the next keystroke from readbuffer or the terminal ==
+	 *
+	 * If readbuffer has a character from a previous multi-byte key
+	 * decode, consume it first.  Otherwise polls the terminal via
+	 * safe_read_key.  Processes pending signals between attempts so
+	 * SIGWINCH is handled promptly.  Dies if the terminal becomes
+	 * unreadable.
+	 */
 	int c;
 
 	if (g->readbuffer[0]) {
@@ -237,6 +283,14 @@ again:
 static void
 queue_bracketed_paste(struct editor *g)
 {
+	/*
+	 * == Accumulate a bracketed-paste payload into g->ioq ==
+	 *
+	 * Reads keystrokes until KEYCODE_PASTE_END, collecting them into a
+	 * heap buffer.  Replaces g->ioq_start so that subsequent get_one_char
+	 * calls drain the pasted text as if it were typed.  Pastes larger
+	 * than 1 MiB are silently truncated and a status message is shown.
+	 */
 	char *paste;
 	size_t cap = 256;
 	size_t len = 0;
@@ -283,6 +337,15 @@ queue_bracketed_paste(struct editor *g)
 int
 get_one_char(struct editor *g)
 {
+	/*
+	 * == Get the next input character from the macro queue or the terminal ==
+	 *
+	 * Priority: ioq (macro/paste replay) first, then the terminal via
+	 * readit.  When adding2q is set, each character is also appended to
+	 * last_modifying_cmd so the last editing command can be replayed by
+	 * the dot operator.  Bracketed-paste sequences are transparently
+	 * intercepted and queued as plain text.
+	 */
 	int c;
 
 get_from_queue:

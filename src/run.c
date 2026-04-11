@@ -40,23 +40,32 @@
 static int
 is_ident_start(unsigned char c)
 {
+	/*
+	 * == True if c can start a C-style identifier ==
+	 */
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
 }
 
 static int
 is_ident(unsigned char c)
 {
+	/*
+	 * == True if c can continue a C-style identifier ==
+	 */
 	return is_ident_start(c) || (c >= '0' && c <= '9');
 }
 
-/*
- * Replace [rs, re] (inclusive) with new_buf[0..new_len-1].
- * Assumes new_buf contains no NUL bytes (safe for text content).
- */
 static void
 raw_replace(struct editor *g, char *rs, char *re,
             const char *new_buf, int new_len)
 {
+	/*
+	 * == Replace the text [rs, re] (inclusive) with new_buf[0..new_len-1] ==
+	 *
+	 * Deletes the old range via text_hole_delete, then inserts the new
+	 * content via string_insert, chaining both into one undo unit.  If
+	 * new_len is 0, only the deletion is performed.
+	 */
 	char *tmp;
 
 	if (rs <= re)
@@ -78,6 +87,9 @@ static void
 run_upper(struct editor *g, int argc, char *argv[],
           char *rs, char *re)
 {
+	/*
+	 * == :run upper — uppercase all ASCII letters in the range ==
+	 */
 	int len = (int)(re - rs + 1);
 	char *p;
 
@@ -92,6 +104,9 @@ static void
 run_lower(struct editor *g, int argc, char *argv[],
           char *rs, char *re)
 {
+	/*
+	 * == :run lower — lowercase all ASCII letters in the range ==
+	 */
 	int len = (int)(re - rs + 1);
 	char *p;
 
@@ -108,6 +123,9 @@ static void
 run_trim(struct editor *g, int argc, char *argv[],
          char *rs, char *re)
 {
+	/*
+	 * == :run trim — strip trailing whitespace from each line in the range ==
+	 */
 	int range_len = (int)(re - rs + 1);
 	char *new_buf = malloc((size_t)range_len + 1);
 	char *p, *out;
@@ -149,6 +167,9 @@ static void
 run_uniq(struct editor *g, int argc, char *argv[],
          char *rs, char *re)
 {
+	/*
+	 * == :run uniq — remove consecutive duplicate lines in the range ==
+	 */
 	int range_len = (int)(re - rs + 1);
 	char *new_buf = malloc((size_t)range_len + 1);
 	char *p, *out;
@@ -198,6 +219,9 @@ struct line_ref {
 static int
 line_cmp_asc(const void *a, const void *b)
 {
+	/*
+	 * == Ascending comparator for struct line_ref, used by run_sort ==
+	 */
 	const struct line_ref *la = a, *lb = b;
 	int min_len = la->len < lb->len ? la->len : lb->len;
 	int cmp = memcmp(la->start, lb->start, (size_t)min_len);
@@ -207,6 +231,9 @@ line_cmp_asc(const void *a, const void *b)
 static int
 line_cmp_desc(const void *a, const void *b)
 {
+	/*
+	 * == Descending comparator for struct line_ref (reverses line_cmp_asc) ==
+	 */
 	return line_cmp_asc(b, a);
 }
 
@@ -214,6 +241,12 @@ static void
 run_sort(struct editor *g, int argc, char *argv[],
          char *rs, char *re)
 {
+	/*
+	 * == :run sort [-r] — sort lines in the range lexicographically ==
+	 *
+	 * -r reverses the order.  Splits the range into line_ref structs,
+	 * sorts with qsort(), then rebuilds the region with raw_replace.
+	 */
 	int reverse = (argc >= 2 && strcmp(argv[1], "-r") == 0);
 	int range_len = (int)(re - rs + 1);
 	int max_lines = range_len / 2 + 2;
@@ -267,6 +300,12 @@ static void
 run_wrap(struct editor *g, int argc, char *argv[],
          char *rs, char *re)
 {
+	/*
+	 * == :run wrap N — hard-wrap each line in the range at column N ==
+	 *
+	 * Finds the last space at or before column N and breaks there; if no
+	 * space exists, breaks at column N exactly.  Requires N >= 4.
+	 */
 	int col;
 	int range_len = (int)(re - rs + 1);
 	char *new_buf;
@@ -332,6 +371,12 @@ static void
 run_number(struct editor *g, int argc, char *argv[],
            char *rs, char *re)
 {
+	/*
+	 * == :run number — prepend sequential line numbers to each line ==
+	 *
+	 * Numbers are right-justified in a field wide enough for the last line
+	 * number, followed by a tab.
+	 */
 	int range_len = (int)(re - rs + 1);
 	/* max prefix "99999. " = 7 chars per line */
 	char *new_buf = malloc((size_t)range_len + range_len / 2 + 16);
@@ -368,6 +413,12 @@ static void
 run_deindent(struct editor *g, int argc, char *argv[],
              char *rs, char *re)
 {
+	/*
+	 * == :run deindent [N] — remove N indent levels from each line ==
+	 *
+	 * Removes up to N leading tabs or g->tabstop-width space runs per line.
+	 * N defaults to 1.
+	 */
 	int levels = (argc >= 2) ? atoi(argv[1]) : 1;
 	int tabstop = g->tabstop > 0 ? g->tabstop : 4;
 	int range_len = (int)(re - rs + 1);
@@ -419,6 +470,12 @@ static void
 run_align(struct editor *g, int argc, char *argv[],
           char *rs, char *re)
 {
+	/*
+	 * == :run align CHAR — align each line so CHAR appears in the same column ==
+	 *
+	 * Pads each line with spaces before the first occurrence of CHAR so all
+	 * occurrences land in the same column (the rightmost across all lines).
+	 */
 	char target;
 	int range_len = (int)(re - rs + 1);
 	char *new_buf;
@@ -504,6 +561,9 @@ run_align(struct editor *g, int argc, char *argv[],
 static int
 url_safe(unsigned char c)
 {
+	/*
+	 * == True if c is an RFC 3986 unreserved character (no percent-encoding needed) ==
+	 */
 	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
 	       (c >= '0' && c <= '9') || c == '-' || c == '_' ||
 	       c == '.' || c == '~';
@@ -513,6 +573,9 @@ static void
 run_urlencode(struct editor *g, int argc, char *argv[],
               char *rs, char *re)
 {
+	/*
+	 * == :run urlencode — percent-encode the range as a URL component ==
+	 */
 	int range_len = (int)(re - rs + 1);
 	char *new_buf = malloc((size_t)range_len * 3 + 1);
 	char *p, *out;
@@ -542,6 +605,9 @@ run_urlencode(struct editor *g, int argc, char *argv[],
 static int
 hex_val(unsigned char c)
 {
+	/*
+	 * == Convert a hex digit character to its integer value (0–15), or -1 ==
+	 */
 	if (c >= '0' && c <= '9')
 		return c - '0';
 	if (c >= 'a' && c <= 'f')
@@ -555,6 +621,9 @@ static void
 run_urldecode(struct editor *g, int argc, char *argv[],
               char *rs, char *re)
 {
+	/*
+	 * == :run urldecode — decode percent-encoded sequences in the range ==
+	 */
 	int range_len = (int)(re - rs + 1);
 	char *new_buf = malloc((size_t)range_len + 1);
 	char *p, *out;
@@ -596,6 +665,9 @@ static void
 run_base64enc(struct editor *g, int argc, char *argv[],
               char *rs, char *re)
 {
+	/*
+	 * == :run base64enc — encode the range as Base64 (with line wrapping) ==
+	 */
 	int range_len = (int)(re - rs + 1);
 	/* base64 output: 4 bytes per 3 input, plus newlines every 76 chars */
 	char *new_buf = malloc((size_t)range_len * 2 + 8);
@@ -637,6 +709,9 @@ run_base64enc(struct editor *g, int argc, char *argv[],
 static int
 b64_val(unsigned char c)
 {
+	/*
+	 * == Map a Base64 digit character to its 6-bit value (0–63), or -1 ==
+	 */
 	if (c >= 'A' && c <= 'Z')
 		return c - 'A';
 	if (c >= 'a' && c <= 'z')
@@ -654,6 +729,9 @@ static void
 run_base64dec(struct editor *g, int argc, char *argv[],
               char *rs, char *re)
 {
+	/*
+	 * == :run base64dec — decode Base64 text in the range back to binary ==
+	 */
 	int range_len = (int)(re - rs + 1);
 	char *new_buf = malloc((size_t)range_len + 1);
 	char *p, *out;
@@ -697,6 +775,15 @@ static void
 run_jsonesc(struct editor *g, int argc, char *argv[],
             char *rs, char *re)
 {
+	/*
+	 * == :run jsonesc — escape special characters for JSON string embedding ==
+	 *
+	 * Replaces each byte in the range with its JSON escape sequence where
+	 * required: backslash, double-quote, control characters (\n \r \t \b \f),
+	 * and any other byte below 0x20 encoded as \uXXXX.  Printable bytes are
+	 * copied as-is.  Allocates up to 6× the range length to accommodate the
+	 * worst-case expansion.
+	 */
 	int range_len = (int)(re - rs + 1);
 	char *new_buf = malloc((size_t)range_len * 6 + 1);
 	char *p, *out;
@@ -755,6 +842,15 @@ static void
 run_jsonunesc(struct editor *g, int argc, char *argv[],
               char *rs, char *re)
 {
+	/*
+	 * == :run jsonunesc — decode JSON escape sequences back to raw bytes ==
+	 *
+	 * Walks the range and expands each \X escape: \", \\, \/, \n, \r, \t,
+	 * \b, \f are converted to their single-byte equivalents.  \uXXXX is
+	 * decoded as a Unicode codepoint and re-encoded as UTF-8 (BMP only;
+	 * surrogates are not combined).  Unrecognised escapes are passed through
+	 * literally.  Output is always shorter than or equal to the input.
+	 */
 	int range_len = (int)(re - rs + 1);
 	char *new_buf = malloc((size_t)range_len + 1);
 	char *p, *out;
@@ -855,6 +951,15 @@ static void
 run_freq(struct editor *g, int argc, char *argv[],
          char *rs, char *re)
 {
+	/*
+	 * == :run freq — count word frequencies and display the top 5 ==
+	 *
+	 * Scans the range for identifier-like tokens (is_ident_start / is_ident),
+	 * accumulates counts in a fixed-size table (up to FREQ_MAX_WORDS unique
+	 * words, each up to FREQ_WORD_LEN-1 characters), then partial-sorts to
+	 * find the five most frequent and displays them on the status bar.
+	 * Words longer than FREQ_WORD_LEN are silently skipped.
+	 */
 	struct word_freq wf[FREQ_MAX_WORDS];
 	int n = 0;
 	char *p = rs;
@@ -923,6 +1028,13 @@ static void
 run_col(struct editor *g, int argc, char *argv[],
         char *rs, char *re)
 {
+	/*
+	 * == :run col — report the maximum column width across all lines in range ==
+	 *
+	 * Counts bytes per line (newline-delimited) and displays the widest line
+	 * length on the status bar.  Useful for checking whether text exceeds a
+	 * column limit before wrapping or aligning.
+	 */
 	int max_col = 0;
 	char *p = rs;
 
@@ -951,6 +1063,13 @@ run_col(struct editor *g, int argc, char *argv[],
 static uint64_t
 fnv1a(const char *s, int len)
 {
+	/*
+	 * == FNV-1a 64-bit hash of a byte string ==
+	 *
+	 * Standard Fowler-Noll-Vo hash: XOR each byte into the accumulator then
+	 * multiply by FNV_PRIME.  Used by run_hash for both collision analysis
+	 * and identifier replacement.
+	 */
 	uint64_t h = FNV_OFFSET;
 	int i;
 
@@ -965,6 +1084,16 @@ static void
 run_hash(struct editor *g, int argc, char *argv[],
          char *rs, char *re)
 {
+	/*
+	 * == :run hash — FNV-1a hash analysis and replacement for the range ==
+	 *
+	 * Three sub-commands selected by argv[1]:
+	 *   (default)      — hash the entire range, display as decimal + hex
+	 *   mod N          — hash each identifier and report bucket
+	 *                    collisions when spread across N slots (1..65536)
+	 *   replace [mod N] — replace each identifier with its raw hash value
+	 *                     (or hash mod N); changes are chained into one undo
+	 */
 	/* hash mod N — per-identifier: report bucket distribution/collisions */
 	if (argc >= 3 && strcmp(argv[1], "mod") == 0) {
 		uint64_t N = (uint64_t)atoi(argv[2]);
@@ -1068,6 +1197,14 @@ run_hash(struct editor *g, int argc, char *argv[],
 static int
 c2s(const char *src, int len, char *dst)
 {
+	/*
+	 * == Convert a camelCase identifier to snake_case ==
+	 *
+	 * Inserts an underscore before each uppercase letter that follows a
+	 * lowercase letter, or before an uppercase letter that precedes a
+	 * lowercase one (handles sequences like "XMLParser" → "xml_parser").
+	 * All letters are lowercased in the output.  Returns the output length.
+	 */
 	int i, n = 0;
 
 	for (i = 0; i < len; i++) {
@@ -1086,6 +1223,12 @@ c2s(const char *src, int len, char *dst)
 static int
 s2c(const char *src, int len, char *dst)
 {
+	/*
+	 * == Convert a snake_case identifier to camelCase ==
+	 *
+	 * Removes each underscore and capitalises the following letter.
+	 * Leading underscores are preserved as-is.  Returns the output length.
+	 */
 	int i, n = 0, cap_next = 0, leading = 1;
 
 	for (i = 0; i < len; i++) {
@@ -1106,6 +1249,12 @@ s2c(const char *src, int len, char *dst)
 static int
 s2uc(const char *src, int len, char *dst)
 {
+	/*
+	 * == Convert a snake_case identifier to UpperCamelCase (PascalCase) ==
+	 *
+	 * Like s2c but the very first letter is also capitalised.  Leading
+	 * underscores are preserved.  Returns the output length.
+	 */
 	int i, n = 0, cap_next = 1, leading = 1;
 
 	for (i = 0; i < len; i++) {
@@ -1127,6 +1276,17 @@ static void
 run_convert(struct editor *g, int argc, char *argv[],
             char *rs, char *re)
 {
+	/*
+	 * == :run convert — rename identifiers across a range ==
+	 *
+	 * Applies one of three transforms (selected by argv[1]) to every
+	 * identifier-like token in the range:
+	 *   c2s  — camelCase → snake_case
+	 *   s2c  — snake_case → camelCase
+	 *   s2uc — snake_case → UpperCamelCase
+	 * Tokens that don't change are left untouched.  All substitutions are
+	 * chained into a single undo entry.  Reports the count on the status bar.
+	 */
 	int (*transform)(const char *, int, char *);
 	char *p = rs;
 	char *re_cur = re;
@@ -1199,6 +1359,13 @@ static void
 run_echo(struct editor *g, int argc, char *argv[],
          char *rs, char *re)
 {
+	/*
+	 * == :run echo — display arguments on the status bar ==
+	 *
+	 * Joins argv[1..argc-1] with single spaces and writes the result to
+	 * the status line.  Does not modify the buffer; rs/re are ignored.
+	 * Useful for debugging :run pipelines or displaying computed values.
+	 */
 	char buf[STATUS_BUFFER_LEN];
 	int n = 0, i;
 
@@ -1225,6 +1392,13 @@ static void
 run_wc(struct editor *g, int argc, char *argv[],
        char *rs, char *re)
 {
+	/*
+	 * == :run wc — count lines, words, and bytes in the range ==
+	 *
+	 * Scans the range byte-by-byte, counting newlines (lines), whitespace-
+	 * delimited runs (words), and total bytes.  Displays "N lines  N words
+	 * N bytes" on the status bar.  Does not modify the buffer.
+	 */
 	int lines = 0, words = 0, bytes = 0, in_word = 0;
 	char *p;
 
@@ -1252,6 +1426,14 @@ static void
 run_highlight(struct editor *g, int argc, char *argv[],
               char *rs, char *re)
 {
+	/*
+	 * == :run highlight — set or clear the persistent highlight pattern ==
+	 *
+	 * If argv[1] is non-empty, copies it into g->highlight_pattern (freeing
+	 * any previous value) so that the screen renderer can mark matching text.
+	 * Passing no argument or an empty string clears the highlight.
+	 * Does not modify the buffer; rs/re are ignored.
+	 */
 	(void)rs;
 	(void)re;
 	free(g->highlight_pattern);
@@ -1294,6 +1476,13 @@ void
 run_dispatch(struct editor *g, int argc, char *argv[],
              char *rs, char *re)
 {
+	/*
+	 * == Public entry point: dispatch a :run sub-command by name ==
+	 *
+	 * Searches run_table[] for an entry whose name matches argv[0] and calls
+	 * its handler.  Reports an error on the status bar if the name is not
+	 * found.  All built-in :run commands are registered in run_table[].
+	 */
 	int i;
 
 	if (argc < 1)

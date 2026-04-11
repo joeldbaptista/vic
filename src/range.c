@@ -35,6 +35,26 @@ is_ascii_punct(unsigned char c)
 int
 range_find(struct editor *g, char **start, char **stop, const struct cmd_ctx *ctx)
 {
+	/*
+	 * == Resolve the target range for an operator command ==
+	 *
+	 * Determines start/stop buffer pointers and returns buftype
+	 * (PARTIAL, MULTI, WHOLE, or -1 on failure).  The range key c is
+	 * obtained from ctx->rg when the parser captured it, or by calling
+	 * get_motion_char() for interactive input.
+	 *
+	 * Handles:
+	 *   - Y, doubled operator (dd, cc, yy) — WHOLE line range
+	 *   - text objects (a/i prefix)         — delegated to textobj.c
+	 *   - characterwise motions (^, $, b, e, f, t, …) — PARTIAL
+	 *   - word motions (w, W)               — MULTI with end trimming
+	 *   - linewise motions (G, H, j, k, …)  — WHOLE
+	 *   - l and Space                       — PARTIAL (capped at EOL)
+	 *   - { and }                           — MULTI/WHOLE depending on position
+	 *
+	 * After the motion, normalises p ≤ q and trims one codepoint for
+	 * motions that overshoot (b, ^, 0, h, …).
+	 */
 	char *p;
 	char *q;
 	char *t;

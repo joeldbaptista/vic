@@ -24,6 +24,12 @@
 char *
 cp_start(struct editor *g, char *p)
 {
+	/*
+	 * == Snap pointer to the lead byte of its UTF-8 codepoint ==
+	 *
+	 * If p lands inside a multi-byte sequence (continuation byte 0x80–0xBF),
+	 * walks backward to the lead byte.  Clamps to [g->text, g->end].
+	 */
 	if (p <= g->text)
 		return g->text;
 	if (p >= g->end)
@@ -36,6 +42,12 @@ cp_start(struct editor *g, char *p)
 char *
 cp_next(struct editor *g, char *p)
 {
+	/*
+	 * == Advance one UTF-8 codepoint ==
+	 *
+	 * Snaps p to its codepoint start, then steps forward via stepfwd.
+	 * Clamps at g->end.
+	 */
 	p = cp_start(g, p);
 	if (p >= g->end)
 		return g->end;
@@ -45,6 +57,12 @@ cp_next(struct editor *g, char *p)
 char *
 cp_prev(struct editor *g, char *p)
 {
+	/*
+	 * == Retreat one UTF-8 codepoint ==
+	 *
+	 * Steps p back to the lead byte of the preceding codepoint via stepbwd.
+	 * Clamps at g->text.
+	 */
 	if (p <= g->text)
 		return g->text;
 	return (char *)stepbwd(p, g->text);
@@ -53,12 +71,27 @@ cp_prev(struct editor *g, char *p)
 char *
 cp_end(struct editor *g, char *p)
 {
+	/*
+	 * == One past the last byte of the codepoint at p ==
+	 *
+	 * Thin wrapper around cp_next.  Callers that need the half-open
+	 * endpoint [p, cp_end(p)) use this instead of cp_next directly for
+	 * clarity.
+	 */
 	return cp_next(g, p);
 }
 
 int
 utf8_cell_width(const char *p, const char *e)
 {
+	/*
+	 * == Terminal column width of one UTF-8 codepoint ==
+	 *
+	 * Decodes the codepoint in [p, e) and queries wcwidth().  Returns 1
+	 * for ASCII, control characters, surrogates, out-of-range values, and
+	 * any codepoint wcwidth() deems non-printable.
+	 * Used by screen.c and next_column to compute column positions.
+	 */
 	const unsigned char *s = (const unsigned char *)p;
 	size_t len = (size_t)(e - p);
 	uint32_t cp;
@@ -94,6 +127,14 @@ utf8_cell_width(const char *p, const char *e)
 int
 next_column(struct editor *g, const char *p, int co)
 {
+	/*
+	 * == Column number after advancing past the character at p ==
+	 *
+	 * Given the current column co, returns the column that follows the
+	 * character at p.  Tabs snap to the next tab stop; control characters
+	 * consume two columns ('^' + char); other codepoints use
+	 * utf8_cell_width.
+	 */
 	unsigned char c = (unsigned char)*p;
 	char *next;
 
@@ -111,6 +152,13 @@ next_column(struct editor *g, const char *p, int co)
 int
 get_column(struct editor *g, char *p)
 {
+	/*
+	 * == Column offset of buffer pointer p ==
+	 *
+	 * Walks from begin_line to p, accumulating column widths via
+	 * next_column.  Returns 0 for the first column.
+	 * Used by autoindent, the | motion, and status-line rendering.
+	 */
 	char *r;
 	char *limit;
 	int co = 0;
