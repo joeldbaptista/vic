@@ -121,7 +121,7 @@ sh_colorize(int state, const char *line, int len, char *attrs)
 	if (state == SH_DQUOTE) {
 		while (i < len) {
 			if (line[i] == '\\') {
-				SET(i, i + 2 < len ? i + 2 : i + 1, ATTR_STRING);
+				SET(i, i + 1 < len ? i + 2 : i + 1, ATTR_STRING);
 				i += 2;
 				continue;
 			}
@@ -180,7 +180,7 @@ normal:
 			SET(start, i, ATTR_STRING);
 			while (i < len) {
 				if (line[i] == '\\') {
-					SET(i, i + 2 < len ? i + 2 : i + 1,
+					SET(i, i + 1 < len ? i + 2 : i + 1,
 					    ATTR_STRING);
 					i += 2;
 					continue;
