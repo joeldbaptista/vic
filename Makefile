@@ -36,6 +36,34 @@ check-ubsan-pty: vic-ubsan tools/check-pty
 
 check-sanitizers-pty: check-asan-pty check-ubsan-pty
 
+UNIT_TESTS = tests/test_utf8 tests/test_color_c tests/test_color_py \
+             tests/test_color_sh tests/test_color_md tests/test_color_sql
+
+tests/test_utf8: tests/test_utf8.c src/utf8.c
+	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_utf8.c src/utf8.c
+
+tests/test_color_c: tests/test_color_c.c src/color_c.c
+	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_c.c src/color_c.c
+
+tests/test_color_py: tests/test_color_py.c src/color_py.c
+	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_py.c src/color_py.c
+
+tests/test_color_sh: tests/test_color_sh.c src/color_sh.c
+	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_sh.c src/color_sh.c
+
+tests/test_color_md: tests/test_color_md.c src/color_md.c
+	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_md.c src/color_md.c
+
+tests/test_color_sql: tests/test_color_sql.c src/color_sql.c
+	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_sql.c src/color_sql.c
+
+check-unit: $(UNIT_TESTS)
+	@failed=0; \
+	for t in $(UNIT_TESTS); do \
+	    ./$$t || failed=1; \
+	done; \
+	exit $$failed
+
 frmt:
 	clang-format -i src/*.c src/*.h tools/*.c
 
@@ -52,4 +80,4 @@ deploy:
 	ssh w01 "cd ~/vic && make clean && make"
 
 clean:
-	rm -f vic vic-asan vic-ubsan tools/check-pty
+	rm -f vic vic-asan vic-ubsan tools/check-pty $(UNIT_TESTS)

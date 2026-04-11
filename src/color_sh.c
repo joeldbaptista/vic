@@ -176,6 +176,7 @@ normal:
 		/* Double-quoted string — $-expansion applies inside. */
 		if (c == '"') {
 			int start = i++;
+			int closed = 0;
 			SET(start, i, ATTR_STRING);
 			while (i < len) {
 				if (line[i] == '\\') {
@@ -207,11 +208,12 @@ normal:
 				SET(i, i + 1, ATTR_STRING);
 				if (line[i] == '"') {
 					i++;
+					closed = 1;
 					break;
 				}
 				i++;
 			}
-			if (i >= len)
+			if (!closed)
 				state = SH_DQUOTE;
 			continue;
 		}
