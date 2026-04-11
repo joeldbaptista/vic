@@ -786,8 +786,12 @@ static const struct tc cases[] = {
 	/* named registers */
 	TC("register-yank-put", "\"ayyj\"ap:write\r", "foo\nbar\n", "foo\nbar\nfoo\n"),
 	/* shift */
-	TC("shift-right", ">>:write\r", "foo\n",   "\tfoo\n"),
-	TC("shift-left",  "<<:write\r", "\tfoo\n", "foo\n"),
+	TC("shift-right",        ">>:write\r",    "foo\n",                  "\tfoo\n"),
+	TC("shift-left",         "<<:write\r",    "\tfoo\n",                "foo\n"),
+	TC("shift-right-motion",  ">3j:write\r",       "a\nb\nc\nd\ne\n",   "\ta\n\tb\n\tc\n\td\ne\n"),
+	TC("shift-left-motion",   "<2j:write\r",       "\ta\n\tb\n\tc\nd\n","a\nb\nc\nd\n"),
+	TC("shift-right-visual",  "Vjj>:write\r",      "a\nb\nc\nd\n",      "\ta\n\tb\n\tc\nd\n"),
+	TC("shift-left-visual",   "Vjj<:write\r",      "\ta\n\tb\n\tc\nd\n","a\nb\nc\nd\n"),
 	/* ZZ write-and-quit */
 	TC("zz-write-quit", "xZZ", "hello\n", "ello\n"),
 	/* dot repeat */
