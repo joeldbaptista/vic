@@ -130,6 +130,7 @@ visual_apply_operator(struct editor *g, int op)
 	 *   >/< — indent/de-indent each line in the selection
 	 *   x/d — delete (x is remapped to d)
 	 *   c  — delete and enter INSERT mode
+	 *   C  — cut (delete into register, no INSERT mode); +C targets SHARED_REG
 	 *
 	 * Calls visual_leave() before mutating the buffer so that the `< and
 	 * `> marks are set correctly before any pointer adjustment.
@@ -219,7 +220,7 @@ visual_apply_operator(struct editor *g, int op)
 		return;
 	}
 
-	if (op == 'x')
+	if (op == 'x' || op == 'C')
 		op = 'd';
 
 	g->dot = yank_delete_current(g, start, stop, buftype, 1, ALLOW_UNDO);

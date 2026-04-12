@@ -820,6 +820,11 @@ static const struct tc cases[] = {
 	TC("replace-mode", "RXY\x1b:write\r", "abcde\n", "XYcde\n"),
 	/* clipboard register */
 	TC("visual-shared-yank-put", "viw+yj$+p:write\r", "abc\ndef\n", "abc\ndefabc\n"),
+	/* visual cut (C) — cut to default register, paste elsewhere */
+	TC("visual-cut-char",        "vllCj$p:write\r",    "abcde\nXXX\n", "de\nXXXabc\n"),
+	TC("visual-cut-line",        "VCp:write\r",        "one\ntwo\nthree\n", "two\none\nthree\n"),
+	/* visual +C — cut to shared register, paste elsewhere */
+	TC("visual-cut-shared",      "viw+Cj$+p:write\r",  "abc\ndef\n", "\ndefabc\n"),
 	/* :r! */
 	TC("read-shell",      ":r!echo hello\r:write\r",       "first\nlast\n", "first\nhello\nlast\n"),
 	TC("read-shell-addr", ":1r!echo inserted\r:write\r",   "aaa\nbbb\n",    "aaa\ninserted\nbbb\n"),

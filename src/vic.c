@@ -1271,7 +1271,7 @@ do_cmd(struct editor *g, int c, const struct cmd_ctx *ctx)
 			}
 			goto dc1;
 		}
-		if (in_set(c, "dcyxpUu<>")) {
+		if (in_set(c, "dcyxpUuC<>")) {
 			visual_apply_operator(g, c);
 			goto dc1;
 		}
