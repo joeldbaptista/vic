@@ -242,7 +242,7 @@ strchr_backslash(const char *s, int c)
 static char *
 regex_search(struct editor *g, char *q, regex_t *preg,
              const char *Rorig, size_t *len_F, size_t *len_R,
-             char **R)
+             char **R, int eflags)
 {
 	/*
 	 * == Find the next match on line q and build the replacement string ==
@@ -270,7 +270,7 @@ regex_search(struct editor *g, char *q, regex_t *preg,
 		int rc;
 
 		*eol = '\0';
-		rc = regexec(preg, q, MAX_SUBPATTERN, regmatch, 0);
+		rc = regexec(preg, q, MAX_SUBPATTERN, regmatch, eflags);
 		*eol = sv;
 		if (rc != 0)
 			return found;
@@ -1013,8 +1013,10 @@ colon_do_substitute(struct editor *g, const struct colon_state *cs)
 	for (i = b; i <= e; i++) {
 		char *ls = q;
 		char *found;
+		int eflags = 0;
 	vc4:
-		found = regex_search(g, q, &preg, Rorig, &len_F, &len_R, &R);
+		found = regex_search(g, q, &preg, Rorig, &len_F, &len_R, &R,
+		                     eflags);
 		if (found) {
 			uintptr_t bias;
 			if (len_F)
@@ -1037,8 +1039,14 @@ colon_do_substitute(struct editor *g, const struct colon_state *cs)
 				}
 			}
 			if (gflag == 'g') {
-				if ((found + len_R) < end_line(g, ls)) {
-					q = found + len_R;
+				char *next = found + len_R;
+				/* Zero-width match: step past it so the retry
+				 * can't re-match the same empty position. */
+				if (len_F == 0 && next < end_line(g, ls))
+					next++;
+				if (next < end_line(g, ls)) {
+					q = next;
+					eflags = REG_NOTBOL;
 					goto vc4;
 				}
 			}
