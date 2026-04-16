@@ -826,6 +826,12 @@ static const struct tc cases[] = {
 	TC("visual-block-delete-comment", "0lll\x16jlllld:write\r",
 	   "/* comment1 */\n/* comment2 */\n", "/* nt1 */\n/* nt2 */\n"),
 	TC("visual-block-yank",      "0lll\x16jlllly:write\r", "abcdefghij\nklmnopqrst\n", "abcdefghij\nklmnopqrst\n"),
+	/* block visual I — insert at col_left on every row in the block */
+	TC("visual-block-insert",    "0lll\x16jIXX\x1b:write\r",
+	   "abcdefghij\nklmnopqrst\n", "abcXXdefghij\nklmXXnopqrst\n"),
+	/* block visual I — row shorter than col_left is skipped */
+	TC("visual-block-insert-short", "0lll\x16" "2jIXX\x1b:write\r",
+	   "abcdefg\nkl\npqrstuv\n", "abcXXdefg\nkl\npqrXXstuv\n"),
 	/* visual cut (C) — cut to default register, paste elsewhere */
 	TC("visual-cut-char",        "vllCj$p:write\r",    "abcde\nXXX\n", "de\nXXXabc\n"),
 	TC("visual-cut-line",        "VCp:write\r",        "one\ntwo\nthree\n", "two\none\nthree\n"),

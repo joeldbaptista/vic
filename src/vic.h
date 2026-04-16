@@ -224,6 +224,13 @@ struct editor {
 	int vis_ai_pending;  /* 0=none; 'a'/'i'=collecting text-object anchor */
 	int vis_reg_pending; /* 0=none; 1=saw '"', waiting for register char  */
 
+	/* --- Block-visual insert (I in Ctrl-V mode) --- */
+	int vis_block_insert_active;    /* 1 while a block-insert replay is pending */
+	int vis_block_insert_col;       /* col_left of the block selection */
+	int vis_block_insert_start_off; /* byte offset into text[] where insert began */
+	int vis_block_row_top_off;      /* byte offset of the block's top begin_line */
+	int vis_block_row_bot_off;      /* byte offset of the block's bottom begin_line */
+
 	/* --- Settings (:set options) --- */
 	int setops;
 	int readonly_mode;

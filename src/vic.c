@@ -1247,6 +1247,10 @@ do_cmd(struct editor *g, int c, const struct cmd_ctx *ctx)
 		}
 		if (1 <= c || Isprint(c)) {
 			g->dot = char_insert(g, g->dot, c, ALLOW_UNDO_QUEUED);
+			if (c == ASCII_ESC && g->vis_block_insert_active) {
+				visual_block_insert_replay(g);
+				g->vis_block_insert_active = 0;
+			}
 		}
 		goto dc1;
 	}
@@ -1297,6 +1301,22 @@ do_cmd(struct editor *g, int c, const struct cmd_ctx *ctx)
 		}
 		if (in_set(c, "dcyxpUuC<>")) {
 			visual_apply_operator(g, c);
+			goto dc1;
+		}
+		if (c == 'I' && g->visual_mode == 3) {
+			int col_left, col_right;
+			char *row_top, *row_bot;
+
+			block_visual_cols(g, &col_left, &col_right, &row_top,
+			                  &row_bot);
+			visual_leave(g);
+			g->dot = move_to_col(g, row_top, col_left);
+			g->vis_block_insert_active = 1;
+			g->vis_block_insert_col = col_left;
+			g->vis_block_insert_start_off = (int)(g->dot - g->text);
+			g->vis_block_row_top_off = (int)(row_top - g->text);
+			g->vis_block_row_bot_off = (int)(row_bot - g->text);
+			edit_run_start_insert_cmd(g);
 			goto dc1;
 		}
 		if ((unsigned)c < ASCII_DEL && strchr(modifying_cmds, c)) {
@@ -1450,6 +1470,7 @@ edit_file(struct editor *g, char *fn)
 	g->cmd_mode = 0;
 	g->visual_mode = 0;
 	g->visual_anchor = NULL;
+	g->vis_block_insert_active = 0;
 	g->cmdcnt = 0;
 	g->offset = 0;
 	c = '\0';

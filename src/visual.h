@@ -14,6 +14,7 @@ void visual_enter(struct editor *g, int mode); /* 1=char  2=line  3=block */
 int visual_get_range(struct editor *g, char **start, char **stop,
                      int *buftype);
 void visual_apply_operator(struct editor *g, int op);
+void visual_block_insert_replay(struct editor *g);
 void block_visual_cols(struct editor *g, int *col_left, int *col_right,
                        char **row_top, char **row_bot);
 struct block_range *block_selection_ranges(struct editor *g, int *count);

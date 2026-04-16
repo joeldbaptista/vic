@@ -28,6 +28,94 @@
 #include "status.h"
 
 void
+visual_block_insert_replay(struct editor *g)
+{
+	/*
+	 * == Replay a block-visual I insertion onto every row below the first ==
+	 *
+	 * Called immediately after ESC exits the interactive insert that was
+	 * triggered by 'I' in Ctrl-V block-visual mode.  At this point the text
+	 * typed by the user has already been inserted on the first row of the
+	 * block (at vis_block_insert_col).  This function inserts the same text
+	 * at vis_block_insert_col on every subsequent row in the block that is
+	 * long enough to reach that column.
+	 *
+	 * The net-inserted string is read directly from the buffer
+	 * ([vis_block_insert_start_off .. g->dot] inclusive) so that backspaces
+	 * and other editing during the insert session are accounted for.
+	 *
+	 * Rows are processed bottom-to-top so that insertions at lower rows do
+	 * not shift the buffer positions of rows still to be processed.
+	 * Because text_hole_make may realloc g->text the realloc bias is
+	 * propagated to the remaining row-pointer array after each insertion.
+	 */
+	char *insert_start;
+	int insert_len;
+	char *insert_text;
+	char *row_top;
+	char *row_bot;
+	int col;
+	int nrows;
+	char **rows;
+	int i;
+
+	insert_start = g->text + g->vis_block_insert_start_off;
+	insert_len = (int)(g->dot - insert_start) + 1;
+	if (insert_len <= 0)
+		return;
+
+	insert_text = xstrndup(insert_start, (size_t)insert_len);
+
+	row_top = g->text + g->vis_block_row_top_off;
+	/*
+	 * vis_block_row_bot_off was recorded before the user typed anything.
+	 * All insert_len bytes were inserted on row_top (at insert_start_off),
+	 * which comes before row_bot in the buffer.  Each insertion shifted
+	 * row_bot one byte forward, so the current begin_line of the bottom
+	 * row is at the saved offset + insert_len.
+	 */
+	row_bot = g->text + g->vis_block_row_bot_off + insert_len;
+	col = g->vis_block_insert_col;
+
+	/* Count rows below row_top in the block. */
+	nrows = count_lines(g, row_top, row_bot) - 1;
+	if (nrows <= 0) {
+		free(insert_text);
+		return;
+	}
+
+	/* Collect begin_line pointers for rows row_top+1 .. row_bot. */
+	rows = xmalloc((size_t)nrows * sizeof(*rows));
+	{
+		char *r = next_line(g, row_top);
+		for (i = 0; i < nrows; i++, r = next_line(g, r))
+			rows[i] = r;
+	}
+
+	/*
+	 * Process bottom-to-top.  After each insertion the bias from any
+	 * realloc is applied to rows not yet processed (they come before the
+	 * insertion point in the buffer and are therefore not memmove'd, but
+	 * they do need the realloc bias applied).
+	 */
+	for (i = nrows - 1; i >= 0; i--) {
+		char *p = move_to_col(g, rows[i], col);
+		if (get_column(g, p) == col) {
+			uintptr_t bias = string_insert(g, p, insert_text,
+			                               ALLOW_UNDO_CHAIN);
+			if (bias) {
+				int j;
+				for (j = 0; j < i; j++)
+					rows[j] += bias;
+			}
+		}
+	}
+
+	free(rows);
+	free(insert_text);
+}
+
+void
 visual_leave(struct editor *g)
 {
 	/*
