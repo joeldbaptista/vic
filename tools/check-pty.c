@@ -761,11 +761,11 @@ static const struct tc cases[] = {
 	TC("hash",  "jj#x:write\r", "foo one\nfoo two\nfoo three\n", "foo one\noo two\nfoo three\n"),
 	TC("gstar", "g*x:write\r",  "foo\nzfooz\nfoo\n",             "foo\nzooz\nfoo\n"),
 	TC("ghash", "G0g#x:write\r","foo\nzfooz\nfoo\n",             "foo\nzooz\nfoo\n"),
-	/* j/k and arrow keys land on first non-blank */
-	TC("j-first-nonblank",    "jiX\x1b:write\r",       "top\n    mid\nbottom\n", "top\n    Xmid\nbottom\n"),
-	TC("k-first-nonblank",    "GkiX\x1b:write\r",      "top\n    mid\nbottom\n", "top\n    Xmid\nbottom\n"),
-	TC("down-first-nonblank", "\x1b[BiX\x1b:write\r",  "top\n    mid\nbottom\n", "top\n    Xmid\nbottom\n"),
-	TC("up-first-nonblank",   "G\x1b[AiX\x1b:write\r", "top\n    mid\nbottom\n", "top\n    Xmid\nbottom\n"),
+	/* j/k and arrow keys preserve column; CR/- go to first non-blank */
+	TC("j-keep-col",          "jiX\x1b:write\r",       "top\n    mid\nbottom\n", "top\nX    mid\nbottom\n"),
+	TC("k-keep-col",          "GkiX\x1b:write\r",      "top\n    mid\nbottom\n", "top\nX    mid\nbottom\n"),
+	TC("down-keep-col",       "\x1b[BiX\x1b:write\r",  "top\n    mid\nbottom\n", "top\nX    mid\nbottom\n"),
+	TC("up-keep-col",         "G\x1b[AiX\x1b:write\r", "top\n    mid\nbottom\n", "top\nX    mid\nbottom\n"),
 	/* visual mode */
 	TC("visual-char-delete",      "vld:write\r",       "abcde\n",    "cde\n"),
 	TC("visual-line-delete",      "Vjd:write\r",       "one\ntwo\nthree\n", "three\n"),
@@ -820,6 +820,12 @@ static const struct tc cases[] = {
 	TC("replace-mode", "RXY\x1b:write\r", "abcde\n", "XYcde\n"),
 	/* clipboard register */
 	TC("visual-shared-yank-put", "viw+yj$+p:write\r", "abc\ndef\n", "abc\ndefabc\n"),
+	/* block visual — column-preserving j/k (the \x16 is Ctrl-V) */
+	/* anchor=col3, 4 right moves → cols 3-7 deleted on each row */
+	TC("visual-block-delete",    "0lll\x16jlllld:write\r", "abcdefghij\nklmnopqrst\n", "abcij\nklmst\n"),
+	TC("visual-block-delete-comment", "0lll\x16jlllld:write\r",
+	   "/* comment1 */\n/* comment2 */\n", "/* nt1 */\n/* nt2 */\n"),
+	TC("visual-block-yank",      "0lll\x16jlllly:write\r", "abcdefghij\nklmnopqrst\n", "abcdefghij\nklmnopqrst\n"),
 	/* visual cut (C) — cut to default register, paste elsewhere */
 	TC("visual-cut-char",        "vllCj$p:write\r",    "abcde\nXXX\n", "de\nXXXabc\n"),
 	TC("visual-cut-line",        "VCp:write\r",        "one\ntwo\nthree\n", "two\none\nthree\n"),

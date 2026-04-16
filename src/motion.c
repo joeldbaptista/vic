@@ -444,14 +444,21 @@ void
 motion_run_next_line_keep_col_cmd(struct editor *g)
 {
 	/*
-	 * == Move to the next line, preserving the column index (Ctrl-J) ==
+	 * == Move to the next line, preserving the column (j / Down / Ctrl-J) ==
 	 *
-	 * Unlike j, this variant restores the saved column (g->cindex) rather
-	 * than skipping leading whitespace.  Used to implement Ctrl-J / linefeed
-	 * motions that maintain horizontal position.
+	 * Captures the cursor's current visual column via get_column before the
+	 * motion loop so that the result is correct even when refresh() was
+	 * skipped because input was queued (e.g. PTY tests, fast macros).
+	 *
+	 * g->cindex == -1 is an explicit "end-of-line" signal set by $ ; in
+	 * that case we pass a very large column to move_to_col so it walks to
+	 * the last character on the destination line.
 	 */
 	char *p;
 	char *q = g->dot;
+	int col;
+
+	col = (g->cindex < 0) ? INT_MAX : get_column(g, g->dot);
 
 	do {
 		p = next_line(g, q);
@@ -462,9 +469,37 @@ motion_run_next_line_keep_col_cmd(struct editor *g)
 		q = p;
 	} while (--g->cmdcnt > 0);
 
-	g->dot = q;
-	g->dot = g->cindex < 0 ? end_line(g, g->dot)
-	                       : move_to_col(g, g->dot, g->cindex);
+	g->dot = move_to_col(g, q, col);
+	g->cindex = (col == INT_MAX) ? -1 : col;
+	g->keep_index = TRUE;
+}
+
+void
+motion_run_prev_line_keep_col_cmd(struct editor *g)
+{
+	/*
+	 * == Move to the previous line, preserving the column (k / Up) ==
+	 *
+	 * Mirror of motion_run_next_line_keep_col_cmd; see its comment for the
+	 * rationale behind using get_column instead of reading g->cindex.
+	 */
+	char *p;
+	char *q = g->dot;
+	int col;
+
+	col = (g->cindex < 0) ? INT_MAX : get_column(g, g->dot);
+
+	do {
+		p = prev_line(g, q);
+		if (p == begin_line(g, q)) {
+			indicate_error(g);
+			return;
+		}
+		q = p;
+	} while (--g->cmdcnt > 0);
+
+	g->dot = move_to_col(g, q, col);
+	g->cindex = (col == INT_MAX) ? -1 : col;
 	g->keep_index = TRUE;
 }
 
@@ -472,7 +507,7 @@ void
 motion_run_next_line_skip_ws_cmd(struct editor *g)
 {
 	/*
-	 * == Move to the next line, landing on the first non-blank (j / CR) ==
+	 * == Move to the next line, landing on the first non-blank (CR / +) ==
 	 */
 	char *p;
 	char *q = g->dot;
@@ -494,7 +529,7 @@ void
 motion_run_prev_line_skip_ws_cmd(struct editor *g)
 {
 	/*
-	 * == Move to the previous line, landing on the first non-blank (k / -) ==
+	 * == Move to the previous line, landing on the first non-blank (- / k-) ==
 	 */
 	char *p;
 	char *q = g->dot;

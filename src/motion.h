@@ -28,6 +28,7 @@ void motion_run_right_cmd(struct editor *g);
 void motion_run_prev_empty_line_cmd(struct editor *g);
 void motion_run_next_empty_line_cmd(struct editor *g);
 void motion_run_next_line_keep_col_cmd(struct editor *g);
+void motion_run_prev_line_keep_col_cmd(struct editor *g);
 void motion_run_next_line_skip_ws_cmd(struct editor *g);
 void motion_run_prev_line_skip_ws_cmd(struct editor *g);
 void motion_run_line_end_cmd(struct editor *g);
