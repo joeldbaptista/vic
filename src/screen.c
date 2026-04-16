@@ -40,12 +40,18 @@
  * Every entry is a complete self-contained SGR sequence.
  * COMMENT = cyan (36), STRING = yellow (33), PREPROC = magenta (35),
  * KEYWORD = bold (1), NUMBER = green (32).
+ *
+ * Visual selection uses plain reverse video (\033[7m) for all syntax
+ * attribute types.  Combining reverse with a syntax color (e.g. \033[7;35m)
+ * can produce a highlight that is visually indistinguishable from the
+ * un-selected syntax color on certain terminals and color schemes.  Pure
+ * reverse video is terminal-agnostic and always produces a visible contrast.
  */
 static const char *const sgr_table[2][ATTR_COUNT] = {
     /* not in visual selection */
     {"\033[m", "\033[36m", "\033[33m", "\033[35m", "\033[1m", "\033[32m"},
-    /* inside visual selection (reverse video + color) */
-    {"\033[7m", "\033[7;36m", "\033[7;33m", "\033[7;35m", "\033[1;7m", "\033[7;32m"},
+    /* inside visual selection — plain reverse video overrides syntax color */
+    {"\033[7m", "\033[7m", "\033[7m", "\033[7m", "\033[7m", "\033[7m"},
 };
 
 void

@@ -740,6 +740,102 @@ run_visual_esc_clear(const char *vi_path, const char *tmp_dir)
 }
 
 /* ------------------------------------------------------------------ */
+/* block visual highlight test on a .c file                            */
+/* ------------------------------------------------------------------ */
+
+/*
+ * run_block_visual_highlight_c — verify visual+color SGR emitted for block
+ * visual on syntax-highlighted characters in a .c file.
+ *
+ * Creates a .c file so the C colorizer activates.  Opens vic, enters block
+ * visual (Ctrl-V) and extends one line down.  Scans terminal output for the
+ * reverse+magenta escape ("\x1b[7;35m") that should appear on the '#' chars
+ * highlighted as ATTR_PREPROC inside the visual block.
+ *
+ * A second pass checks reverse+cyan ("\x1b[7;36m") for a comment-star block.
+ */
+static int
+run_block_visual_highlight_c(const char *vi_path, const char *tmp_dir)
+{
+	const char *name = "visual-block-highlight-c";
+	/*
+	 * Visual selection uses plain reverse video (\033[7m) for all syntax
+	 * attribute types — both PREPROC ('#') and COMMENT ('*') lines must
+	 * emit this sequence when their column falls inside the block.
+	 */
+	const char *vis_sgr = "\x1b[7m";
+	char path[512];
+	int master, rc, timed_out;
+	int has_preproc = 0, has_comment = 0;
+	pid_t pid;
+	struct buf out;
+
+	/* --- test 1: '#' in #define lines --- */
+	snprintf(path, sizeof(path), "%s/vic_bvhl.c", tmp_dir);
+	write_file(path, "#define FOO 1\n#define BAR 2\n");
+
+	master = open_master_pty();
+	if (master < 0)
+		return 0;
+	pid = spawn_vic(master, vi_path, path);
+	if (pid < 0) { close(master); return 0; }
+
+	buf_init(&out);
+	wait_startup(master, pid, &out, basename_of(path), STARTUP_TIMEOUT);
+	pump_output(master, pid, &out, STARTUP_SETTLE);
+	/* Ctrl-V then j: block visual spanning '#' on both lines */
+	write_all(master, (const unsigned char *)"\x16j", 2);
+	pump_output(master, pid, &out, 0.35);
+
+	has_preproc = (xmemmem(out.data, out.len,
+	                       vis_sgr, strlen(vis_sgr)) != NULL);
+
+	write_all(master, (const unsigned char *)"\x1b:q!\r", 5);
+	rc = finish(pump_output(master, pid, &out, FINISH_TIMEOUT), pid, &timed_out);
+	close(master);
+	buf_free(&out);
+
+	/* --- test 2: '*' in C block comment lines --- */
+	write_file(path, "/*\n * foo\n * bar\n");
+
+	master = open_master_pty();
+	if (master < 0)
+		return has_preproc; /* partial result */
+	pid = spawn_vic(master, vi_path, path);
+	if (pid < 0) { close(master); return has_preproc; }
+
+	buf_init(&out);
+	wait_startup(master, pid, &out, basename_of(path), STARTUP_TIMEOUT);
+	pump_output(master, pid, &out, STARTUP_SETTLE);
+	/* go to col 1 (the '*'), Ctrl-V, then 2j: block on '*' of all 3 lines */
+	write_all(master, (const unsigned char *)"0l\x16" "2j", 5);
+	pump_output(master, pid, &out, 0.35);
+
+	has_comment = (xmemmem(out.data, out.len,
+	                       vis_sgr, strlen(vis_sgr)) != NULL);
+
+	write_all(master, (const unsigned char *)"\x1b:q!\r", 5);
+	rc = finish(pump_output(master, pid, &out, FINISH_TIMEOUT), pid, &timed_out);
+	close(master);
+	buf_free(&out);
+
+	printf("[%s] rc=%d timed_out=%s\n", name, rc, timed_out ? "True" : "False");
+	if (has_preproc && has_comment) {
+		printf("[%s] PASS\n", name);
+	} else {
+		printf("[%s] FAIL\n", name);
+		if (!has_preproc)
+			printf("[%s] missing reverse-video SGR for PREPROC block visual\n",
+			       name);
+		if (!has_comment)
+			printf("[%s] missing reverse-video SGR for COMMENT block visual\n",
+			       name);
+	}
+	printf("[%s] file: %s\n", name, path);
+	return has_preproc && has_comment;
+}
+
+/* ------------------------------------------------------------------ */
 /* test case table                                                      */
 /* ------------------------------------------------------------------ */
 
@@ -832,6 +928,22 @@ static const struct tc cases[] = {
 	TC("visual-block-delete",    "0lll\x16jlllld:write\r", "abcdefghij\nklmnopqrst\n", "abcij\nklmst\n"),
 	TC("visual-block-delete-comment", "0lll\x16jlllld:write\r",
 	   "/* comment1 */\n/* comment2 */\n", "/* nt1 */\n/* nt2 */\n"),
+	/* block visual on col0 '#' and col1 '*' — the characters rendered by
+	 * the C colorizer as PREPROC/COMMENT must be selectable and deletable */
+	TC("visual-block-delete-hash", "0\x16" "2jd:write\r",
+	   "#define FOO\n#define BAR\n#define BAZ\n",
+	   "define FOO\ndefine BAR\ndefine BAZ\n"),
+	/* five consecutive '#include' lines as in vi-example.c lines 7-11 */
+	TC("visual-block-delete-5includes", "0\x16" "4jd:write\r",
+	   "#include \"vi.h\"\n#include <locale.h>\n#include <regex.h>\n#include <wchar.h>\n#include <wctype.h>\n",
+	   "include \"vi.h\"\ninclude <locale.h>\ninclude <regex.h>\ninclude <wchar.h>\ninclude <wctype.h>\n"),
+	TC("visual-block-delete-star", "0l\x16" "2jd:write\r",
+	   "/*\n * foo\n * bar\n",
+	   "/\n  foo\n  bar\n"),
+	/* six-line block comment as in vi-example.c lines 1-6; select '*' col 1 */
+	TC("visual-block-delete-comment-star-6lines", "0l\x16" "5jd:write\r",
+	   "/*\n * line1\n * line2\n *\n * line4\n */\n",
+	   "/\n  line1\n  line2\n \n  line4\n /\n"),
 	TC("visual-block-yank",      "0lll\x16jlllly:write\r", "abcdefghij\nklmnopqrst\n", "abcdefghij\nklmnopqrst\n"),
 	/* block visual I — insert at col_left on every row in the block */
 	TC("visual-block-insert",    "0lll\x16jIXX\x1b:write\r",
@@ -922,6 +1034,8 @@ main(int argc, char *argv[])
 		all_ok = run_visual_highlight(vi_path, tmp_dir) && all_ok;
 	if (matches_filter("visual-esc-clears-highlight", filter))
 		all_ok = run_visual_esc_clear(vi_path, tmp_dir) && all_ok;
+	if (matches_filter("visual-block-highlight-c", filter))
+		all_ok = run_block_visual_highlight_c(vi_path, tmp_dir) && all_ok;
 
 	return all_ok ? 0 : 1;
 }
