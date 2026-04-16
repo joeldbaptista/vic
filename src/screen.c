@@ -308,6 +308,15 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 	int cur_attr = ATTR_NORMAL;
 	int have_visual = visual_get_range(g, &vstart, &vstop, &vbuftype);
 	(void)vbuftype;
+	int bv_col_left = 0, bv_col_right = 0;
+	char *bv_row_top = NULL, *bv_row_bot_end = NULL;
+	int have_block_visual = (g->visual_mode == 3 && g->visual_anchor != NULL);
+	if (have_block_visual) {
+		char *bv_row_bot;
+		block_visual_cols(g, &bv_col_left, &bv_col_right,
+		                  &bv_row_top, &bv_row_bot);
+		bv_row_bot_end = end_line(g, bv_row_bot);
+	}
 	char *dest = g->scr_out_buf;
 	char *dest_end = dest + sizeof(g->scr_out_buf) - 1;
 	char *line_start = src;
@@ -360,11 +369,35 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 		if (src >= g->end)
 			break;
 		next = cp_next(g, src);
+
+		/* Skip bare continuation bytes (0x80–0xBF) and truncated multi-byte
+		 * lead sequences.  These arise when multi-byte characters are being
+		 * inserted one byte at a time and a redraw occurs mid-sequence.
+		 * Sending partial UTF-8 to the terminal produces replacement glyphs;
+		 * skipping here lets the render loop reach the '\n' cleanly. */
+		{
+			unsigned char fb = (unsigned char)*src;
+			if (fb >= 0x80) {
+				size_t have = (size_t)(next - src);
+				size_t need = fb < 0xC0 ? 0
+				            : fb < 0xE0 ? 2
+				            : fb < 0xF0 ? 3 : 4;
+				if (need == 0 || have < need) {
+					src = next;
+					continue;
+				}
+			}
+		}
+
 		c = (unsigned char)*src;
 		if (c == '\n')
 			break;
 
-		new_visual = (have_visual && src >= vstart && src <= vstop) ? 1 : 0;
+		if (have_block_visual)
+			new_visual = (src >= bv_row_top && src <= bv_row_bot_end &&
+			              co >= bv_col_left && co <= bv_col_right) ? 1 : 0;
+		else
+			new_visual = (have_visual && src >= vstart && src <= vstop) ? 1 : 0;
 		byte_off = (int)(src - line_start);
 		new_hl = (!new_visual && hl_re && byte_off < line_len &&
 		          hl_attrs[byte_off]) ? 1 : 0;

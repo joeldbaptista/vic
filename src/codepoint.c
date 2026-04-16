@@ -46,23 +46,23 @@ cp_next(struct editor *g, char *p)
 	 * == Advance one UTF-8 codepoint ==
 	 *
 	 * Snaps p to its codepoint start, then steps forward via stepfwd.
-	 * Clamps at g->end.  Always advances at least one byte: when p sits
-	 * in a truncated multi-byte sequence (e.g. mid-paste in insert mode,
-	 * after the lead byte of an em-dash but before all continuations
-	 * arrive), stepfwd from the snapped lead can return p itself; without
-	 * this guard, callers like get_column would spin.
+	 * Clamps at g->end.
+	 *
+	 * When p is a continuation byte inside an incomplete or invalid sequence,
+	 * cp_start() retreats to the lead byte and stepfwd() may return a position
+	 * at or before the original p.  Guard against that to ensure callers
+	 * always make progress.
 	 */
-	char *next;
+	char *orig = p;
+	char *n;
 
+	p = cp_start(g, p);
 	if (p >= g->end)
 		return g->end;
-	next = (char *)stepfwd(cp_start(g, p), g->end);
-	if (next <= p) {
-		next = p + 1;
-		if (next > g->end)
-			next = g->end;
-	}
-	return next;
+	n = (char *)stepfwd(p, g->end);
+	if (n <= orig)
+		return orig < g->end ? orig + 1 : g->end;
+	return n;
 }
 
 char *

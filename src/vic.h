@@ -34,7 +34,8 @@
 enum {
 	PARTIAL = 0,
 	WHOLE = 1,
-	MULTI = 2
+	MULTI = 2,
+	BLOCK = 3
 };
 
 #ifndef ARRAY_SIZE
@@ -218,7 +219,7 @@ struct editor {
 	char *rstart;                /* start of text in Replace mode */
 
 	/* --- Visual mode --- */
-	int visual_mode; /* 0=off  1=charwise  2=linewise */
+	int visual_mode; /* 0=off  1=charwise  2=linewise  3=block */
 	char *visual_anchor;
 	int vis_ai_pending;  /* 0=none; 'a'/'i'=collecting text-object anchor */
 	int vis_reg_pending; /* 0=none; 1=saw '"', waiting for register char  */
