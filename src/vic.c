@@ -752,7 +752,7 @@ run_visual_char_mode_cmd(struct editor *g)
 	if (g->visual_mode == 1)
 		visual_leave(g);
 	else
-		visual_enter(g, 0);
+		visual_enter(g, 1);
 }
 
 static void
@@ -767,7 +767,22 @@ run_visual_line_mode_cmd(struct editor *g)
 	if (g->visual_mode == 2)
 		visual_leave(g);
 	else
-		visual_enter(g, 1);
+		visual_enter(g, 2);
+}
+
+static void
+run_visual_block_mode_cmd(struct editor *g)
+{
+	/*
+	 * == Ctrl-V — toggle block visual mode ==
+	 *
+	 * If already in block visual mode (visual_mode == 3), leaves it.
+	 * Otherwise enters block visual mode.
+	 */
+	if (g->visual_mode == 3)
+		visual_leave(g);
+	else
+		visual_enter(g, 3);
 }
 
 static void
@@ -1140,6 +1155,7 @@ dispatch_cmd(struct editor *g, int c, const struct cmd_ctx *ctx)
 	    {'~', operator_run_flip_case_cmd, NULL},
 	    {'v', run_visual_char_mode_cmd, NULL},
 	    {'V', run_visual_line_mode_cmd, NULL},
+	    {ASCII_CTRL_V, run_visual_block_mode_cmd, NULL},
 	    {'P', run_put_before_cmd, NULL},
 	    {'p', run_put_after_cmd, NULL},
 	    {'{', run_paragraph_bck_cmd, NULL},
@@ -1259,6 +1275,14 @@ do_cmd(struct editor *g, int c, const struct cmd_ctx *ctx)
 				g->dot = begin_line(g, g->dot);
 				g->last_status_cksum = 0;
 			}
+			goto dc1;
+		}
+		if (c == ASCII_CTRL_V) {
+			if (g->visual_mode == 3)
+				visual_leave(g);
+			else
+				g->visual_mode = 3;
+			g->last_status_cksum = 0;
 			goto dc1;
 		}
 		if (in_set(c, "oO")) {

@@ -47,11 +47,22 @@ cp_next(struct editor *g, char *p)
 	 *
 	 * Snaps p to its codepoint start, then steps forward via stepfwd.
 	 * Clamps at g->end.
+	 *
+	 * When p is a continuation byte inside an incomplete or invalid sequence,
+	 * cp_start() retreats to the lead byte and stepfwd() may return a position
+	 * at or before the original p.  Guard against that to ensure callers
+	 * always make progress.
 	 */
+	char *orig = p;
+	char *n;
+
 	p = cp_start(g, p);
 	if (p >= g->end)
 		return g->end;
-	return (char *)stepfwd(p, g->end);
+	n = (char *)stepfwd(p, g->end);
+	if (n <= orig)
+		return orig < g->end ? orig + 1 : g->end;
+	return n;
 }
 
 char *

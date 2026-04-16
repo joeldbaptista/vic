@@ -36,11 +36,18 @@ check-ubsan-pty: vic-ubsan tools/check-pty
 
 check-sanitizers-pty: check-asan-pty check-ubsan-pty
 
-UNIT_TESTS = tests/test_utf8 tests/test_color_c tests/test_color_py \
+UNIT_TESTS = tests/test_utf8 tests/test_line tests/test_codepoint \
+             tests/test_color_c tests/test_color_py \
              tests/test_color_sh tests/test_color_md tests/test_color_sql
 
 tests/test_utf8: tests/test_utf8.c src/utf8.c
 	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_utf8.c src/utf8.c
+
+tests/test_line: tests/test_line.c src/line.c
+	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_line.c src/line.c
+
+tests/test_codepoint: tests/test_codepoint.c src/codepoint.c src/line.c src/utf8.c
+	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_codepoint.c src/codepoint.c src/line.c src/utf8.c
 
 tests/test_color_c: tests/test_color_c.c src/color_c.c
 	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_c.c src/color_c.c
@@ -80,4 +87,4 @@ deploy:
 	ssh w01 "cd ~/vic && make clean && make"
 
 clean:
-	rm -f vic vic-asan vic-ubsan tools/check-pty $(UNIT_TESTS)
+	rm -f vic vic-asan vic-ubsan tools/check-pty $(UNIT_TESTS) tests/test_line tests/test_codepoint

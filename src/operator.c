@@ -125,7 +125,7 @@ shared_yank_in(struct editor *g)
 		g->regtype[SHARED_REG] = PARTIAL;
 }
 
-static void
+void
 yank_sync_out(struct editor *g)
 {
 	/*

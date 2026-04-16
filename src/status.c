@@ -101,6 +101,8 @@ format_edit_status(struct editor *g)
 				mode = "VISUAL -";
 			else if (g->visual_mode == 2)
 				mode = "VISUAL LINE -";
+			else if (g->visual_mode == 3)
+				mode = "VISUAL BLOCK -";
 			else
 				switch (g->cmd_mode & 3) {
 				case 1:
@@ -179,9 +181,9 @@ show_status_line(struct editor *g)
 		fputs(g->status_buffer, stdout);
 		if (g->have_status_msg) {
 			int n = (int)strlen(g->status_buffer) - (g->have_status_msg - 1);
+			g->have_status_msg = 0;
 			if (n >= 0 && n >= (int)g->columns)
 				hit_return(g);
-			g->have_status_msg = 0;
 		}
 		place_cursor(g, g->crow, g->ccol + (int)screen_line_number_width(g));
 	}

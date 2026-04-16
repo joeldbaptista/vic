@@ -4,6 +4,7 @@
 #include "vic.h"
 
 void yank_sync_in(struct editor *g);
+void yank_sync_out(struct editor *g);
 void shared_yank_in(struct editor *g);
 char *text_yank(struct editor *g, char *p, char *q, int dest, int buftype);
 char what_reg(const struct editor *g);
