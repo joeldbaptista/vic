@@ -446,11 +446,14 @@ motion_run_next_line_keep_col_cmd(struct editor *g)
 	/*
 	 * == Move to the next line, preserving the column (j / Down / Ctrl-J) ==
 	 *
-	 * Captures the cursor's current visual column via get_column before the
-	 * motion loop so that the result is correct even when refresh() was
-	 * skipped because input was queued (e.g. PTY tests, fast macros).
+	 * When the previous command was also a vertical motion (prev_keep_index
+	 * is TRUE), g->cindex holds the intended "sticky" column set by that
+	 * prior j/k — use it directly so the column is preserved even when the
+	 * cursor was forced to a shorter line in between.  Otherwise compute
+	 * the column from the actual cursor position via get_column, which is
+	 * always accurate regardless of whether refresh() ran.
 	 *
-	 * g->cindex == -1 is an explicit "end-of-line" signal set by $ ; in
+	 * g->cindex == -1 is an explicit "end-of-line" signal set by $; in
 	 * that case we pass a very large column to move_to_col so it walks to
 	 * the last character on the destination line.
 	 */
@@ -458,7 +461,12 @@ motion_run_next_line_keep_col_cmd(struct editor *g)
 	char *q = g->dot;
 	int col;
 
-	col = (g->cindex < 0) ? INT_MAX : get_column(g, g->dot);
+	if (g->cindex < 0)
+		col = INT_MAX;
+	else if (g->prev_keep_index)
+		col = g->cindex;
+	else
+		col = get_column(g, g->dot);
 
 	do {
 		p = next_line(g, q);
@@ -481,13 +489,18 @@ motion_run_prev_line_keep_col_cmd(struct editor *g)
 	 * == Move to the previous line, preserving the column (k / Up) ==
 	 *
 	 * Mirror of motion_run_next_line_keep_col_cmd; see its comment for the
-	 * rationale behind using get_column instead of reading g->cindex.
+	 * rationale behind prev_keep_index and the sticky column logic.
 	 */
 	char *p;
 	char *q = g->dot;
 	int col;
 
-	col = (g->cindex < 0) ? INT_MAX : get_column(g, g->dot);
+	if (g->cindex < 0)
+		col = INT_MAX;
+	else if (g->prev_keep_index)
+		col = g->cindex;
+	else
+		col = get_column(g, g->dot);
 
 	do {
 		p = prev_line(g, q);

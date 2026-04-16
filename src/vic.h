@@ -285,8 +285,9 @@ struct editor {
 	int get_rowcol_error;
 
 	/* --- Motion --- */
-	int cindex; /* saved column for up/down motion */
-	int keep_index;
+	int cindex;          /* saved column for up/down motion */
+	int keep_index;      /* TRUE = don't overwrite cindex in refresh */
+	int prev_keep_index; /* snapshot of keep_index taken at do_cmd entry */
 
 	/* --- Files --- */
 	char *current_filename;

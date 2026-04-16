@@ -1202,6 +1202,7 @@ do_cmd(struct editor *g, int c, const struct cmd_ctx *ctx)
 	int cnt;
 
 	memset(buf, '\0', sizeof(buf));
+	g->prev_keep_index = g->keep_index;
 	g->keep_index = FALSE;
 	g->cmd_error = FALSE;
 

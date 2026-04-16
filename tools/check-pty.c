@@ -766,6 +766,13 @@ static const struct tc cases[] = {
 	TC("k-keep-col",          "GkiX\x1b:write\r",      "top\n    mid\nbottom\n", "top\nX    mid\nbottom\n"),
 	TC("down-keep-col",       "\x1b[BiX\x1b:write\r",  "top\n    mid\nbottom\n", "top\nX    mid\nbottom\n"),
 	TC("up-keep-col",         "G\x1b[AiX\x1b:write\r", "top\n    mid\nbottom\n", "top\nX    mid\nbottom\n"),
+	/* sticky column survives j through a short line — cursor was at col 3,
+	 * the middle row "kl" only reaches col 1, but the second j must still
+	 * land at col 3 on the third row, not at col 1 */
+	TC("j-sticky-col-through-short", "0llljjiX\x1b:write\r",
+	   "abcde\nkl\npqrst\n", "abcde\nkl\npqrXst\n"),
+	TC("k-sticky-col-through-short", "GlllkkiX\x1b:write\r",
+	   "pqrst\nkl\nabcde\n", "pqrXst\nkl\nabcde\n"),
 	/* visual mode */
 	TC("visual-char-delete",      "vld:write\r",       "abcde\n",    "cde\n"),
 	TC("visual-line-delete",      "Vjd:write\r",       "one\ntwo\nthree\n", "three\n"),
