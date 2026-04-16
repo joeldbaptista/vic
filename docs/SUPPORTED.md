@@ -20,6 +20,10 @@ Last updated: 2026-04-16.
 ## Core motions
 
 - Character motions: `h`, `j`, `k`, `l`, arrows.
+  - `j`/`k` and the arrow keys are column-preserving: the horizontal
+    position is remembered across lines shorter than the target column.
+  - `Enter` and `-` move to the next/previous line landing on the first
+    non-blank character.
 - Line motions: `0`, `$`, `gg`, `G`, `{count}G`.
 - Word motions: `w`, `b`, `e`, `W`, `B`, `E`.
 - Screen motions and scroll: `Ctrl-F`, `Ctrl-B`, `Ctrl-D`, `Ctrl-U`, `Ctrl-E`, `Ctrl-Y`, `H`, `M`, `L`, `z.`.
@@ -39,9 +43,10 @@ Last updated: 2026-04-16.
 - Block visual selection with `Ctrl-V`; anchor and cursor define a column rectangle.
 - Mode switching: pressing `v`, `V`, or `Ctrl-V` while in any visual mode switches to that mode without leaving visual.
 - Visual operators: delete, yank, change, put replacement.
-- Block visual operators: delete (`d`/`x`), yank (`y`), change (`c`), case (`U`/`u`), indent (`>`/`<`).
+- Block visual operators: delete (`d`/`x`), yank (`y`), change (`c`), case (`U`/`u`), indent (`>`/`<`), insert (`I`).
   - Yank stores column content per row; each row is newline-separated in the register with type BLOCK.
   - Lines that do not reach the left column of the block are skipped by operators.
+  - `I` enters insert mode at the left column of the block on the first row; on ESC the typed text is replayed at the same column on every remaining row in the block that reaches that column.
   - Put of a BLOCK-type register is not yet supported.
 - Text objects under operator/visual workflows:
   - Word: `iw`, `aw`, `iW`, `aW`

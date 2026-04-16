@@ -22,13 +22,15 @@ Multiple files are edited in sequence. `:n` advances to the next file;
 
 ## Modes
 
-| Mode    | How to enter                   | How to leave  |
-|---------|--------------------------------|---------------|
-| Normal  | startup / `ESC`                | —             |
-| Insert  | `i a I A o O s S`             | `ESC`         |
-| Replace | `R`                            | `ESC`         |
-| Visual  | `v` (char), `V` (line)         | `ESC` or same key |
-| Command | `:`                            | `Enter` / `ESC` |
+| Mode         | How to enter                   | How to leave      |
+|--------------|--------------------------------|-------------------|
+| Normal       | startup / `ESC`                | —                 |
+| Insert       | `i a I A o O s S`             | `ESC`             |
+| Replace      | `R`                            | `ESC`             |
+| Visual char  | `v`                            | `ESC` or `v`      |
+| Visual line  | `V`                            | `ESC` or `V`      |
+| Visual block | `Ctrl-V`                       | `ESC` or `Ctrl-V` |
+| Command      | `:`                            | `Enter` / `ESC`   |
 
 ---
 
@@ -41,16 +43,19 @@ lines; `d2w` deletes 2 words; `5>>` indents 5 lines.
 
 ### Cursor motion
 
-| Key(s)                    | Action                            |
-|---------------------------|-----------------------------------|
-| `h` `j` `k` `l`           | left / down / up / right          |
-| Arrow keys                | same                              |
-| `w` `W`                   | forward to next word / WORD start |
-| `b` `B`                   | backward to word / WORD start     |
-| `e` `E`                   | forward to word / WORD end        |
-| `0`                       | beginning of line                 |
-| `^`                       | first non-blank of line           |
-| `$`                       | end of line                       |
+| Key(s)                    | Action                                         |
+|---------------------------|------------------------------------------------|
+| `h` `l`                   | left / right                                   |
+| `j` `k`                   | down / up, preserving column across short lines |
+| Arrow keys                | same as `h` `j` `k` `l`                        |
+| `Enter`                   | next line, first non-blank                     |
+| `-`                       | previous line, first non-blank                 |
+| `w` `W`                   | forward to next word / WORD start              |
+| `b` `B`                   | backward to word / WORD start                  |
+| `e` `E`                   | forward to word / WORD end                     |
+| `0`                       | beginning of line                              |
+| `^`                       | first non-blank of line                        |
+| `$`                       | end of line                                    |
 | `gg` / `1G`               | first line                        |
 | `G`                       | last line (or line N with `NG`)   |
 | `H` `M` `L`               | top / middle / bottom of screen   |
@@ -196,10 +201,15 @@ line. With `expandtab` set, Tab inserts spaces instead of a tab character.
 
 ## Visual Mode
 
-`v` enters character-wise visual mode; `V` enters line-wise visual mode.
-Extend the selection with any motion command.
+`v` enters character-wise visual mode; `V` enters line-wise visual mode;
+`Ctrl-V` enters block (column) visual mode. Extend the selection with any
+motion command. Pressing `v`, `V`, or `Ctrl-V` while already in visual mode
+switches to that sub-mode without leaving visual.
 
-Operators available in visual mode:
+`o` swaps the cursor and anchor so you can extend the selection from the
+other end.
+
+### Character and line visual operators
 
 | Key       | Action                         |
 |-----------|--------------------------------|
@@ -210,6 +220,37 @@ Operators available in visual mode:
 | `<`       | de-indent selection            |
 | `~`       | toggle case of selection       |
 | `:`       | enter colon command with `'<,'>` pre-filled |
+
+### Block visual mode (`Ctrl-V`)
+
+The anchor and cursor define a column rectangle across one or more lines.
+All block operators skip rows that do not reach the left column of the
+block.
+
+| Key   | Action                                                         |
+|-------|----------------------------------------------------------------|
+| `d`   | delete the column rectangle                                    |
+| `y`   | yank the column rectangle (register type BLOCK)                |
+| `c`   | delete rectangle and enter insert mode                         |
+| `I`   | insert text at the left column of every row in the block       |
+| `>`   | indent the lines covered by the block                          |
+| `<`   | de-indent the lines covered by the block                       |
+| `U`   | uppercase the rectangle                                        |
+| `u`   | lowercase the rectangle                                        |
+
+**Block insert (`I`):** positions the cursor at the left column of the
+first row and enters insert mode. Type any text, then press `ESC`. The
+typed text is replayed at the same column position on every subsequent row
+in the block.
+
+Example — prepend `//` to three lines:
+
+```
+Select 3 lines with Ctrl-V 2j
+Press I
+Type // and a space
+Press ESC
+```
 
 After leaving visual mode, `'<` and `'>` marks point to the start and end
 of the last selection and can be used as ex addresses.
