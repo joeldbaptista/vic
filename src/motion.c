@@ -471,8 +471,17 @@ motion_run_next_line_keep_col_cmd(struct editor *g)
 	do {
 		p = next_line(g, q);
 		if (p == end_line(g, q)) {
-			indicate_error(g);
-			return;
+			/* Cannot advance further.  When no progress was made at all
+			 * (cursor already on the last line) signal an error and bail
+			 * so that standalone j beeps and pending operators are not
+			 * applied.  When some lines were crossed, clamp to the last
+			 * reachable line so that dMj with M > remaining lines still
+			 * deletes everything below the cursor. */
+			if (q == g->dot) {
+				indicate_error(g);
+				return;
+			}
+			break;
 		}
 		q = p;
 	} while (--g->cmdcnt > 0);
@@ -505,8 +514,11 @@ motion_run_prev_line_keep_col_cmd(struct editor *g)
 	do {
 		p = prev_line(g, q);
 		if (p == begin_line(g, q)) {
-			indicate_error(g);
-			return;
+			if (q == g->dot) {
+				indicate_error(g);
+				return;
+			}
+			break;
 		}
 		q = p;
 	} while (--g->cmdcnt > 0);

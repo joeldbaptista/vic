@@ -944,6 +944,11 @@ static const struct tc cases[] = {
 	TC("visual-block-delete-comment-star-6lines", "0l\x16" "5jd:write\r",
 	   "/*\n * line1\n * line2\n *\n * line4\n */\n",
 	   "/\n  line1\n  line2\n \n  line4\n /\n"),
+	/* dMj / dMk where M exceeds available lines — clamp to buffer boundary */
+	TC("d-j-clamp-at-eof",  "0d100j:write\r", "aaa\nbbb\nccc\n", "\n"),
+	TC("d-j-clamp-partial", "jd100j:write\r", "aaa\nbbb\nccc\n", "aaa\n"),
+	TC("d-k-clamp-at-bof",  "Gd100k:write\r", "aaa\nbbb\nccc\n", "\n"),
+	TC("d-k-clamp-partial", "Gkd100k:write\r", "aaa\nbbb\nccc\n", "ccc\n"),
 	TC("visual-block-yank",      "0lll\x16jlllly:write\r", "abcdefghij\nklmnopqrst\n", "abcdefghij\nklmnopqrst\n"),
 	/* block visual I — insert at col_left on every row in the block */
 	TC("visual-block-insert",    "0lll\x16jIXX\x1b:write\r",
