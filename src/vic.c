@@ -1175,6 +1175,150 @@ dispatch_cmd(struct editor *g, int c, const struct cmd_ctx *ctx)
 	return 0;
 }
 
+/*
+ * Returns 1 if the key was fully handled; 0 if replace mode downgraded
+ * to insert (because dot was on the trailing newline) and the same key
+ * must now be processed as an insert-mode key.
+ */
+static int
+handle_replace_key(struct editor *g, int c)
+{
+	if (c == KEYCODE_INSERT) {
+		edit_run_start_insert_cmd(g);
+		return 1;
+	}
+	if (*g->dot == '\n') {
+		g->cmd_mode = 1; /* past EOL: fall into insert */
+		undo_queue_commit(g);
+		return 0;
+	}
+	if (1 <= c || Isprint(c)) {
+		if (c != 27 && !(c == g->term_orig.c_cc[VERASE] || c == 8 || c == 127)) {
+			char *start = cp_start(g, g->dot);
+			char *stop = cp_end(g, start) - 1;
+			g->dot = yank_delete_current(g, start, stop, PARTIAL, YANKDEL, ALLOW_UNDO);
+		}
+		g->dot = char_insert(g, g->dot, c, ALLOW_UNDO_CHAIN);
+	}
+	return 1;
+}
+
+static void
+handle_insert_key(struct editor *g, int c)
+{
+	if (c == KEYCODE_INSERT) { /* Insert key again = enter replace mode */
+		edit_run_start_replace_cmd(g);
+		return;
+	}
+	if (1 <= c || Isprint(c)) {
+		g->dot = char_insert(g, g->dot, c, ALLOW_UNDO_QUEUED);
+		if (c == ASCII_ESC && g->vis_block_insert_active) {
+			visual_block_insert_replay(g);
+			g->vis_block_insert_active = 0;
+		}
+	}
+}
+
+static void
+handle_visual_key(struct editor *g, int c, const struct cmd_ctx *ctx,
+                  char **orig_dot)
+{
+	if (c == ASCII_ESC) {
+		visual_leave(g);
+		reset_ydreg(g);
+		return;
+	}
+	if (c == 'v') {
+		if (g->visual_mode == 1)
+			visual_leave(g);
+		else
+			g->visual_mode = 1;
+		g->last_status_cksum = 0;
+		return;
+	}
+	if (c == 'V') {
+		if (g->visual_mode == 2)
+			visual_leave(g);
+		else {
+			g->visual_mode = 2;
+			g->visual_anchor =
+			    begin_line(g, g->visual_anchor ? g->visual_anchor : g->dot);
+			g->dot = begin_line(g, g->dot);
+			g->last_status_cksum = 0;
+		}
+		return;
+	}
+	if (c == ASCII_CTRL_V) {
+		if (g->visual_mode == 3)
+			visual_leave(g);
+		else
+			g->visual_mode = 3;
+		g->last_status_cksum = 0;
+		return;
+	}
+	if (in_set(c, "oO")) {
+		char *tmp = g->dot;
+		g->dot = g->visual_anchor;
+		g->visual_anchor = tmp;
+		if (g->visual_mode == 2) {
+			g->dot = begin_line(g, g->dot);
+			g->visual_anchor = begin_line(g, g->visual_anchor);
+		}
+		return;
+	}
+	if (in_set(c, "dcyxpUuC<>")) {
+		visual_apply_operator(g, c);
+		return;
+	}
+	if (c == 'I' && g->visual_mode == 3) {
+		int col_left, col_right;
+		char *row_top, *row_bot;
+
+		block_visual_cols(g, &col_left, &col_right, &row_top,
+		                  &row_bot);
+		visual_leave(g);
+		g->dot = move_to_col(g, row_top, col_left);
+		g->vis_block_insert_active = 1;
+		g->vis_block_insert_col = col_left;
+		g->vis_block_insert_start_off = (int)(g->dot - g->text);
+		g->vis_block_row_top_off = (int)(row_top - g->text);
+		g->vis_block_row_bot_off = (int)(row_bot - g->text);
+		edit_run_start_insert_cmd(g);
+		return;
+	}
+	if ((unsigned)c < ASCII_DEL && strchr(modifying_cmds, c)) {
+		indicate_error(g);
+		return;
+	}
+	if (dispatch_cmd(g, c, ctx))
+		return;
+	if (c == '\'') {
+		run_jump_mark_cmd(g, orig_dot, ctx);
+		return;
+	}
+	{
+		char buf[2] = {(char)c, 0};
+		not_implemented(g, buf);
+	}
+}
+
+static void
+handle_normal_key(struct editor *g, int c, const struct cmd_ctx *ctx,
+                  char **orig_dot)
+{
+	if (dispatch_cmd(g, c, ctx))
+		return;
+	if (c == '\'') {
+		run_jump_mark_cmd(g, orig_dot, ctx);
+		return;
+	}
+	if (c != 0x00) {
+		char buf[2] = {(char)c, 0};
+		not_implemented(g, buf);
+		reset_ydreg(g);
+	}
+}
+
 //----- Execute a Vi Command -----------------------------------
 void
 do_cmd(struct editor *g, int c, const struct cmd_ctx *ctx)
@@ -1182,178 +1326,46 @@ do_cmd(struct editor *g, int c, const struct cmd_ctx *ctx)
 	/*
 	 * == Execute one vi command character in the current editing mode ==
 	 *
-	 * The top-level command dispatcher.  Behaviour depends on cmd_mode:
-	 *   2 (replace) — printable bytes overwrite the character at dot
-	 *   1 (insert)  — printable bytes are inserted before dot
-	 *   0 (normal)  — arrow/page keys go directly to dispatch; visual-mode
-	 *                 commands and operator keys are handled inline; all
-	 *                 other keys are routed through dispatch_cmd().
+	 * Dispatches by (cmd_mode, visual_mode) to the matching per-mode
+	 * handler, then runs the shared epilogue: restore sentinel newline,
+	 * clamp dot, update jump-context, reset cmdcnt, and nudge dot off
+	 * the trailing newline in Normal mode.
 	 *
-	 * After every command:
-	 *   - Re-inserts the sentinel newline if the buffer is empty.
-	 *   - Clamps dot to valid range.
-	 *   - Calls check_context() if dot moved (updates jump context marks).
-	 *   - Clears cmdcnt unless the key was a digit.
-	 *   - Nudges dot off the trailing newline in Normal mode.
+	 * Arrow/page/delete keys always route to the Normal-mode handler,
+	 * regardless of current mode.
 	 */
-
-	char buf[12];
 	char *orig_dot = g->dot;
+	int route_to_normal;
 	int cnt;
 
-	memset(buf, '\0', sizeof(buf));
 	g->prev_keep_index = g->keep_index;
 	g->keep_index = FALSE;
 	g->cmd_error = FALSE;
 
 	show_status_line(g);
 
-	switch (c) {
-	case KEYCODE_UP:
-	case KEYCODE_DOWN:
-	case KEYCODE_LEFT:
-	case KEYCODE_RIGHT:
-	case KEYCODE_HOME:
-	case KEYCODE_END:
-	case KEYCODE_PAGEUP:
-	case KEYCODE_PAGEDOWN:
-	case KEYCODE_DELETE:
-		goto key_cmd_mode;
+	route_to_normal =
+	    c == KEYCODE_UP || c == KEYCODE_DOWN || c == KEYCODE_LEFT ||
+	    c == KEYCODE_RIGHT || c == KEYCODE_HOME || c == KEYCODE_END ||
+	    c == KEYCODE_PAGEUP || c == KEYCODE_PAGEDOWN || c == KEYCODE_DELETE;
+
+	if (!route_to_normal) {
+		if (g->cmd_mode == 2 && handle_replace_key(g, c))
+			goto epilogue;
+		/* replace may have downgraded to insert; re-check cmd_mode */
+		if (g->cmd_mode == 1) {
+			handle_insert_key(g, c);
+			goto epilogue;
+		}
+		if (g->visual_mode) {
+			handle_visual_key(g, c, ctx, &orig_dot);
+			goto epilogue;
+		}
 	}
 
-	if (g->cmd_mode == 2) {
-		if (c == KEYCODE_INSERT) {
-			edit_run_start_insert_cmd(g);
-			goto dc1;
-		}
-		if (*g->dot == '\n') {
-			g->cmd_mode = 1; /* past EOL: fall into insert */
-			undo_queue_commit(g);
-		} else {
-			if (1 <= c || Isprint(c)) {
-				if (c != 27 && !(c == g->term_orig.c_cc[VERASE] || c == 8 || c == 127)) {
-					char *start = cp_start(g, g->dot);
-					char *stop = cp_end(g, start) - 1;
-					g->dot = yank_delete_current(g, start, stop, PARTIAL, YANKDEL, ALLOW_UNDO);
-				}
-				g->dot = char_insert(g, g->dot, c, ALLOW_UNDO_CHAIN);
-			}
-			goto dc1;
-		}
-	}
-	if (g->cmd_mode == 1) {
-		if (c == KEYCODE_INSERT) { /* Insert key again = enter replace mode */
-			edit_run_start_replace_cmd(g);
-			goto dc1;
-		}
-		if (1 <= c || Isprint(c)) {
-			g->dot = char_insert(g, g->dot, c, ALLOW_UNDO_QUEUED);
-			if (c == ASCII_ESC && g->vis_block_insert_active) {
-				visual_block_insert_replay(g);
-				g->vis_block_insert_active = 0;
-			}
-		}
-		goto dc1;
-	}
+	handle_normal_key(g, c, ctx, &orig_dot);
 
-	if (g->visual_mode) {
-		if (c == ASCII_ESC) {
-			visual_leave(g);
-			reset_ydreg(g);
-			goto dc1;
-		}
-		if (c == 'v') {
-			if (g->visual_mode == 1)
-				visual_leave(g);
-			else
-				g->visual_mode = 1;
-			g->last_status_cksum = 0;
-			goto dc1;
-		}
-		if (c == 'V') {
-			if (g->visual_mode == 2)
-				visual_leave(g);
-			else {
-				g->visual_mode = 2;
-				g->visual_anchor =
-				    begin_line(g, g->visual_anchor ? g->visual_anchor : g->dot);
-				g->dot = begin_line(g, g->dot);
-				g->last_status_cksum = 0;
-			}
-			goto dc1;
-		}
-		if (c == ASCII_CTRL_V) {
-			if (g->visual_mode == 3)
-				visual_leave(g);
-			else
-				g->visual_mode = 3;
-			g->last_status_cksum = 0;
-			goto dc1;
-		}
-		if (in_set(c, "oO")) {
-			char *tmp = g->dot;
-			g->dot = g->visual_anchor;
-			g->visual_anchor = tmp;
-			if (g->visual_mode == 2) {
-				g->dot = begin_line(g, g->dot);
-				g->visual_anchor = begin_line(g, g->visual_anchor);
-			}
-			goto dc1;
-		}
-		if (in_set(c, "dcyxpUuC<>")) {
-			visual_apply_operator(g, c);
-			goto dc1;
-		}
-		if (c == 'I' && g->visual_mode == 3) {
-			int col_left, col_right;
-			char *row_top, *row_bot;
-
-			block_visual_cols(g, &col_left, &col_right, &row_top,
-			                  &row_bot);
-			visual_leave(g);
-			g->dot = move_to_col(g, row_top, col_left);
-			g->vis_block_insert_active = 1;
-			g->vis_block_insert_col = col_left;
-			g->vis_block_insert_start_off = (int)(g->dot - g->text);
-			g->vis_block_row_top_off = (int)(row_top - g->text);
-			g->vis_block_row_bot_off = (int)(row_bot - g->text);
-			edit_run_start_insert_cmd(g);
-			goto dc1;
-		}
-		if ((unsigned)c < ASCII_DEL && strchr(modifying_cmds, c)) {
-			indicate_error(g);
-			goto dc1;
-		}
-		if (dispatch_cmd(g, c, ctx))
-			goto dc1;
-		if (c == '\'') {
-			run_jump_mark_cmd(g, &orig_dot, ctx);
-			goto dc1;
-		}
-		buf[0] = c;
-		buf[1] = '\0';
-		not_implemented(g, buf);
-		goto dc1;
-	}
-
-	/*
-	 * NORMAL MODE PARSING
-	 */
-key_cmd_mode:
-	if (dispatch_cmd(g, c, ctx))
-		goto dc1;
-	if (c == '\'') {
-		run_jump_mark_cmd(g, &orig_dot, ctx);
-		goto dc1;
-	}
-	if (c != 0x00) {
-		buf[0] = c;
-		buf[1] = '\0';
-		not_implemented(g, buf);
-		reset_ydreg(g);
-	}
-
-dc1:
+epilogue:
 	if (g->end == g->text) {
 		/* buffer became empty — restore the sentinel newline */
 		char_insert(g, g->text, '\n', NO_UNDO);
