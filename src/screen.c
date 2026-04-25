@@ -601,7 +601,7 @@ refresh(struct editor *g, int full_screen)
 	/* Set up syntax colorizer; pre-scan to get state at the first visible line.
 	 * Call colorize per line with NULL attrs — we only need the returned state.
 	 */
-	colorizer = colorizer_find(g->current_filename);
+	colorizer = IS_SYNTAX(g) ? colorizer_find(g->current_filename) : NULL;
 	color_state = 0;
 	if (colorizer) {
 		char *p = g->text;

@@ -112,6 +112,7 @@ enum {
 #define VI_RELATIVENUMBER (1 << 8)
 #define VI_UNDOFILE (1 << 9)
 #define VI_CURSORSHAPE_INSERT (1 << 10)
+#define VI_SYNTAX (1 << 11)
 
 #define IS_AUTOINDENT(g) ((g)->setops & VI_AUTOINDENT)
 #define IS_EXPANDTAB(g) ((g)->setops & VI_EXPANDTAB)
@@ -120,6 +121,7 @@ enum {
 #define IS_SHOWMATCH(g) ((g)->setops & VI_SHOWMATCH)
 #define IS_NUMBER(g) ((g)->setops & VI_NUMBER)
 #define IS_RELATIVENUMBER(g) ((g)->setops & VI_RELATIVENUMBER)
+#define IS_SYNTAX(g) ((g)->setops & VI_SYNTAX)
 
 #define OPTS_STR           \
 	"ai\0"             \
@@ -143,7 +145,9 @@ enum {
 	"uf\0"             \
 	"undofile\0"       \
 	"cshpi\0"          \
-	"cursorshapeinsert\0"
+	"cursorshapeinsert\0" \
+	"syn\0"            \
+	"syntax\0"
 
 #define SET_READONLY_FILE(flags) ((flags) |= 0x01)
 #define SET_READONLY_MODE(flags) ((flags) |= 0x02)

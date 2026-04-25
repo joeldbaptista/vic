@@ -79,6 +79,15 @@ setops(struct editor *g, char *args, int flg_no)
 	}
 	if (eq)
 		goto bad;
+	if (index & VI_SYNTAX) {
+		/* :set syntax toggles; :set nosyntax forces off. */
+		if (flg_no)
+			g->setops &= ~index;
+		else
+			g->setops ^= index;
+		g->refresh_last_screenbegin = NULL;
+		return;
+	}
 	if (flg_no)
 		g->setops &= ~index;
 	else

@@ -329,6 +329,7 @@ of the last selection and can be used as ex addresses.
 | `cursorshape=N`                 | `cshp=N`  | —       | terminal cursor shape in normal mode (1=block, 2=underline, 3=bar) |
 | `cursorshapeinsert=N`           | `cshpi=N` | —       | terminal cursor shape in insert mode    |
 | `undofile`                      | `uf`      | off     | persist undo history across sessions    |
+| `syntax`                        | `syn`     | on      | syntax highlighting (`:set syntax` toggles) |
 
 ---
 

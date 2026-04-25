@@ -211,6 +211,7 @@ init_globals(struct editor *g)
 	g->session_epoch = time(NULL);
 	g->last_modified_count = -1;
 	g->tabstop = 8;
+	g->setops |= VI_SYNTAX;
 	g->newindent = -1;
 	g->line_count_cache_stamp = INT_MIN;
 	g->refresh_last_modified_count = INT_MIN;

@@ -910,6 +910,7 @@ colon_do_set(struct editor *g, const struct colon_state *cs)
 		                 "%sshowmatch "
 		                 "%snumber "
 		                 "%srelativenumber "
+		                 "%ssyntax "
 		                 "tabstop=%u "
 		                 "cshp=%d cshpi=%d",
 		                 IS_AUTOINDENT(g) ? "" : "no",
@@ -919,6 +920,7 @@ colon_do_set(struct editor *g, const struct colon_state *cs)
 		                 IS_SHOWMATCH(g) ? "" : "no",
 		                 IS_NUMBER(g) ? "" : "no",
 		                 IS_RELATIVENUMBER(g) ? "" : "no",
+		                 IS_SYNTAX(g) ? "" : "no",
 		                 g->tabstop, term_cursor_shape_get_configured());
 		return;
 	}
