@@ -18,6 +18,9 @@
 #include "status.h"
 #include "term.h"
 
+#define INIT_TABSTOP		8
+#define SYNTAX_COLOURING 	0
+
 void
 run_cmds(struct editor *g, char *p)
 {
@@ -210,8 +213,9 @@ init_globals(struct editor *g)
 	 */
 	g->session_epoch = time(NULL);
 	g->last_modified_count = -1;
-	g->tabstop = 8;
-	g->setops |= VI_SYNTAX;
+	g->tabstop = INIT_TABSTOP;
+	if (SYNTAX_COLOURING)
+		g->setops |= VI_SYNTAX;
 	g->newindent = -1;
 	g->line_count_cache_stamp = INT_MIN;
 	g->refresh_last_modified_count = INT_MIN;
