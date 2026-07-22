@@ -8,8 +8,7 @@ UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
 	CFLAGS += -D_DARWIN_C_SOURCE
 endif
-
-vic: src/vic.c src/utf8.c src/compat.c src/term.c src/input.c src/undo.c src/search.c src/screen.c src/motion.c src/operator.c src/editcmd.c src/textobj.c src/range.c src/scan.c src/visual.c src/wordmotion.c src/buffer.c src/session.c src/excore.c src/ex.c src/line.c src/codepoint.c src/context.c src/status.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/run.c src/parser.c
+ vic: src/vic.c src/utf8.c src/compat.c src/term.c src/input.c src/undo.c src/search.c src/screen.c src/motion.c src/operator.c src/editcmd.c src/textobj.c src/range.c src/scan.c src/visual.c src/wordmotion.c src/buffer.c src/session.c src/excore.c src/ex.c src/line.c src/codepoint.c src/context.c src/status.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/run.c src/parser.c
 	$(CC) $(CFLAGS) -o vic src/vic.c src/utf8.c src/compat.c src/term.c src/input.c src/undo.c src/search.c src/screen.c src/motion.c src/operator.c src/editcmd.c src/textobj.c src/range.c src/scan.c src/visual.c src/wordmotion.c src/buffer.c src/session.c src/excore.c src/ex.c src/line.c src/codepoint.c src/context.c src/status.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/run.c src/parser.c
 
 vic-static: src/vic.c src/utf8.c src/compat.c src/term.c src/input.c src/undo.c src/search.c src/screen.c src/motion.c src/operator.c src/editcmd.c src/textobj.c src/range.c src/scan.c src/visual.c src/wordmotion.c src/buffer.c src/session.c src/excore.c src/ex.c src/line.c src/codepoint.c src/context.c src/status.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/run.c src/parser.c
