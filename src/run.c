@@ -11,6 +11,7 @@
  *   convert c2s|s2c|s2uc     — identifier case conversion
  *   upper / lower            — uppercase / lowercase all text in range
  *   trim                     — strip trailing whitespace from each line
+ *   trimsel [0|1|2]          — strip whitespace from selection: 0=both(default),1=begin,2=end
  *   uniq                     — remove consecutive duplicate lines
  *   sort [-r]                — sort lines (reverse with -r)
  *   wrap N                   — hard-wrap lines at column N
@@ -159,6 +160,73 @@ run_trim(struct editor *g, int argc, char *argv[],
 	new_len = (int)(out - new_buf);
 	raw_replace(g, rs, re, new_buf, new_len);
 	free(new_buf);
+}
+
+/* ---- trimsel ----------------------------------------------------------- */
+
+static void
+run_trimsel(struct editor *g, int argc, char *argv[],
+            char *rs, char *re)
+{
+	/*
+	 * == :run trimsel [0|1|2] — strip whitespace from the visual selection ==
+	 *
+	 * The ex range [rs,re] is always line-aligned, so we read MARK_LT and
+	 * MARK_GT directly to get the exact visual byte boundaries.  Falls back
+	 * to [rs,re] when no visual marks are set.
+	 *
+	 * The optional parameter controls which end(s) to strip:
+	 *   0 (default) — strip both leading and trailing whitespace
+	 *   1           — strip leading whitespace only
+	 *   2           — strip trailing whitespace only
+	 */
+	int mode = 0;
+	char *start, *end;
+
+	if (argc >= 2)
+		mode = (int)strtol(argv[1], NULL, 10);
+
+	/* Use exact visual marks when available. */
+	start = g->mark[MARK_LT] ? g->mark[MARK_LT] : rs;
+	end   = g->mark[MARK_GT] ? g->mark[MARK_GT] : re;
+	if (start > end) {
+		char *tmp = start;
+		start = end;
+		end   = tmp;
+	}
+
+	if (mode == 0 || mode == 1) {
+		while (start <= end && (*start == ' ' || *start == '\t' ||
+		                        *start == '\n' || *start == '\r'))
+			start++;
+	}
+	if (mode == 0 || mode == 2) {
+		while (end >= start && (*end == ' ' || *end == '\t' ||
+		                        *end == '\n' || *end == '\r'))
+			end--;
+	}
+
+	if (start > end) {
+		raw_replace(g, g->mark[MARK_LT], g->mark[MARK_GT], "", 0);
+		return;
+	}
+
+	{
+		char *sel_start = g->mark[MARK_LT] ? g->mark[MARK_LT] : rs;
+		char *sel_end   = g->mark[MARK_GT] ? g->mark[MARK_GT] : re;
+		if (sel_start > sel_end) {
+			char *tmp = sel_start; sel_start = sel_end; sel_end = tmp;
+		}
+		if (start > sel_start || end < sel_end) {
+			int new_len = (int)(end - start + 1);
+			char *tmp = malloc((size_t)new_len);
+			if (!tmp)
+				return;
+			memcpy(tmp, start, (size_t)new_len);
+			raw_replace(g, sel_start, sel_end, tmp, new_len);
+			free(tmp);
+		}
+	}
 }
 
 /* ---- uniq -------------------------------------------------------------- */
@@ -1451,6 +1519,7 @@ static const struct run_entry run_table[] = {
     {"upper", run_upper},
     {"lower", run_lower},
     {"trim", run_trim},
+    {"trimsel", run_trimsel},
     {"uniq", run_uniq},
     {"sort", run_sort},
     {"wrap", run_wrap},
