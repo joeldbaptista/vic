@@ -13,6 +13,7 @@
 #include "ex.h"
 
 #include "buffer.h"
+#include "gap.h"
 #include "excore.h"
 #include "line.h"
 #include "motion.h"
@@ -263,20 +264,28 @@ regex_search(struct editor *g, char *q, regex_t *preg,
 	char *found = NULL;
 	const char *t;
 	char *r;
+	char tmp[VI_MAX_LINE + 1]; /* gap-free copy of the line */
 
 	{
 		char *eol = end_line(g, q);
-		char sv = *eol;
+		char *wp = q;
+		int tmplen = 0;
 		int rc;
 
-		*eol = '\0';
-		rc = regexec(preg, q, MAX_SUBPATTERN, regmatch, eflags);
-		*eol = sv;
+		/* Copy line content to tmp, skipping gap bytes. */
+		while (wp < eol && tmplen < VI_MAX_LINE) {
+			if (wp == g->gap_start) { wp = g->gap_end; continue; }
+			tmp[tmplen++] = *wp++;
+		}
+		tmp[tmplen] = '\0';
+
+		rc = regexec(preg, tmp, MAX_SUBPATTERN, regmatch, eflags);
 		if (rc != 0)
 			return found;
 	}
 
-	found = q + regmatch[0].rm_so;
+	/* Map rm_so back to a physical buffer pointer. */
+	found = phys_ptr(g, logical_pos(g, q) + (int)regmatch[0].rm_so);
 	*len_F = (size_t)(regmatch[0].rm_eo - regmatch[0].rm_so);
 	*R = NULL;
 
@@ -291,7 +300,8 @@ fill_result:
 				cur_match = regmatch + (*t - '0');
 				if (cur_match->rm_so >= 0) {
 					len = (size_t)(cur_match->rm_eo - cur_match->rm_so);
-					from = q + cur_match->rm_so;
+					/* Use gap-free tmp so captured text has no gap bytes. */
+					from = tmp + cur_match->rm_so;
 				}
 			}
 		}
@@ -393,23 +403,26 @@ global(struct editor *g, char *p, int invert, int b, int e,
 	line = find_line(g, gstart);
 	for (gi = gstart; gi <= gend && line < g->end; gi++) {
 		char *eol = end_line(g, line);
+		char tmp[VI_MAX_LINE + 1];
+		char *wp = line;
+		int tmplen = 0;
 		regmatch_t m;
 		int matched;
 
-		{
-			char sv = *eol;
-
-			*eol = '\0';
-			matched = (regexec(&preg, line, 1, &m, 0) == 0);
-			*eol = sv;
+		/* Copy line content gap-free for regex. */
+		while (wp < eol && tmplen < VI_MAX_LINE) {
+			if (wp == g->gap_start) { wp = g->gap_end; continue; }
+			tmp[tmplen++] = *wp++;
 		}
+		tmp[tmplen] = '\0';
+		matched = (regexec(&preg, tmp, 1, &m, 0) == 0);
 
 		if (matched != invert) {
 			if (nmatches == cap) {
 				cap *= 2;
 				offsets = xrealloc(offsets, (size_t)cap * sizeof(int));
 			}
-			offsets[nmatches++] = (int)(line - g->text);
+			offsets[nmatches++] = logical_pos(g, line);
 		}
 		line = next_line(g, line);
 	}
@@ -419,11 +432,11 @@ global(struct editor *g, char *p, int invert, int b, int e,
 	for (gi = 0; gi < nmatches; gi++) {
 		int old_size, size_delta;
 
-		if (offsets[gi] < 0 || offsets[gi] >= (int)(g->end - g->text))
+		if (offsets[gi] < 0 || offsets[gi] >= buf_content_size(g))
 			continue; /* line was swallowed by a previous deletion */
 
-		g->dot = g->text + offsets[gi];
-		old_size = (int)(g->end - g->text);
+		g->dot = phys_ptr(g, offsets[gi]);
+		old_size = buf_content_size(g);
 
 		if (gcmd[0]) {
 			char *gcopy = xstrdup(gcmd);
@@ -431,8 +444,8 @@ global(struct editor *g, char *p, int invert, int b, int e,
 			free(gcopy);
 		}
 
-		/* Adjust remaining offsets for any buffer size change. */
-		size_delta = (int)(g->end - g->text) - old_size;
+		/* Adjust remaining logical offsets for any content size change. */
+		size_delta = buf_content_size(g) - old_size;
 		if (size_delta != 0) {
 			for (gj = gi + 1; gj < nmatches; gj++)
 				if (offsets[gj] > offsets[gi])
@@ -551,7 +564,7 @@ colon_do_edit(struct editor *g, const struct colon_state *cs)
 	            (size < 0 ? " [New file]" : ""),
 	            (g->readonly_mode ? " [Readonly]" : ""),
 	            count_lines(g, g->text, g->end - 1),
-	            (int)(g->end - g->text));
+	            buf_content_size(g));
 }
 
 static void
@@ -741,7 +754,6 @@ colon_do_read_cmd(struct editor *g, int e, unsigned got, const char *cmd)
 	size_t cap, len;
 	char *ins_pt;
 	int num;
-	uintptr_t ofs;
 
 	if (pipe(pipefd) < 0) {
 		status_line_bold(g, "pipe: %s", strerror(errno));
@@ -801,9 +813,11 @@ colon_do_read_cmd(struct editor *g, int e, unsigned got, const char *cmd)
 	num = count_lines(g, g->text, ins_pt);
 	if (ins_pt == g->end)
 		num++;
-	ofs = (uintptr_t)(ins_pt - g->text);
-	text_hole_make(g, ins_pt, (int)len);
-	ins_pt = g->text + ofs;
+	{
+		int lofs = logical_pos(g, ins_pt);
+		text_hole_make(g, ins_pt, (int)len);
+		ins_pt = phys_ptr(g, lofs);
+	}
 	memcpy(ins_pt, buf, len);
 	undo_push_insert(g, ins_pt, (int)len, ALLOW_UNDO);
 	g->modified_count++;
@@ -856,15 +870,16 @@ colon_do_read(struct editor *g, const struct colon_state *cs)
 	if (q == g->end)
 		num++;
 	{
-		uintptr_t ofs = (uintptr_t)(q - g->text);
+		int lofs = logical_pos(g, q);
 		size = file_insert(g, fn, q, 0);
-		q = g->text + ofs;
+		q = phys_ptr(g, lofs);
 	}
 	if (size < 0)
 		return;
 	status_line(g, "'%s'%s %uL, %uC", fn,
 	            (g->readonly_mode ? " [Readonly]" : ""),
-	            count_lines(g, q, q + size - 1), size);
+	            count_lines(g, q, phys_ptr(g, logical_pos(g, q) + size - 1)),
+	            size);
 	g->dot = find_line(g, num);
 }
 
@@ -1022,7 +1037,8 @@ colon_do_substitute(struct editor *g, const struct colon_state *cs)
 		if (found) {
 			uintptr_t bias;
 			if (len_F)
-				text_hole_delete(g, found, found + len_F - 1,
+				text_hole_delete(g, found,
+				    phys_ptr(g, logical_pos(g, found) + (int)len_F - 1),
 				                 undo++ ? ALLOW_UNDO_CHAIN : ALLOW_UNDO);
 			if (len_R != 0) {
 				bias = string_insert(g, found, R,
@@ -1041,7 +1057,13 @@ colon_do_substitute(struct editor *g, const struct colon_state *cs)
 				}
 			}
 			if (gflag == 'g') {
-				char *next = found + len_R;
+				char *next;
+				/* After any modification, gap_end is the first content
+				 * byte after the change; use it to avoid gap pointer. */
+				if (len_F > 0 || len_R > 0)
+					next = g->gap_end;
+				else
+					next = found;
 				/* Zero-width match: step past it so the retry
 				 * can't re-match the same empty position. */
 				if (len_F == 0 && next < end_line(g, ls))
@@ -1117,7 +1139,7 @@ colon_do_write(struct editor *g, const struct colon_state *cs)
 			return;
 		}
 		size = l = 0;
-		size = r - q + 1;
+		size = logical_pos(g, r) - logical_pos(g, q) + 1;
 		l = file_write(g, fn, q, r);
 	} else {
 		size = l = 0;
@@ -1126,11 +1148,11 @@ colon_do_write(struct editor *g, const struct colon_state *cs)
 		if (l == -1)
 			status_line_bold_errno(g, fn);
 	} else if (should_write) {
-		int nlines = (l > 0) ? count_lines(g, q, q + l - 1) : 0;
+		int nlines = (l > 0) ? count_lines(g, q, r) : 0;
 		status_line(g, "'%s' %uL, %uC", fn, nlines, l);
 	}
 	if (!should_write || l == size) {
-		if (should_write && q == g->text && q + l == g->end) {
+		if (should_write && q == g->text && r == g->end - 1) {
 			g->modified_count = 0;
 			g->last_modified_count = -1;
 		}

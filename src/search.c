@@ -22,6 +22,7 @@
 #include "search.h"
 
 #include "codepoint.h"
+#include "gap.h"
 #include "input.h"
 #include "line.h"
 #include "screen.h"
@@ -96,29 +97,18 @@ char_search(struct editor *g, char *p, const char *pat,
 	/*
 	 * == Regex search for pat starting at p, forward or backward ==
 	 *
-	 * dir_and_range encodes direction and scope:
-	 *   positive → forward from p to end-of-buffer (or end-of-line if
-	 *              the FULL bit is clear)
-	 *   negative → backward; finds the last match before p
-	 *
-	 * For backward searches, scans line by line and keeps re-matching
-	 * within each segment to find the rightmost occurrence.
-	 * Returns a pointer to the match start in the buffer, or NULL if no
-	 * match is found.  The pattern is compiled with REG_EXTENDED |
-	 * REG_NEWLINE, plus REG_ICASE when ignorecase is set.
+	 * Copies each line to a gap-free temp buffer before calling regexec,
+	 * then maps match offsets back to physical buffer pointers via
+	 * logical_pos/phys_ptr.  This avoids the gap-crossing problems of
+	 * in-place NUL-termination.
 	 */
 	regex_t preg;
 	regmatch_t m;
 	int flags;
 	int full;
-	char *region_start;
 	char *region_end;
-	char *line;
-	char *eol;
-	char *seg_end;
 	char *result = NULL;
-	char *cur;
-	char save;
+	char buf[VI_MAX_LINE + 1];
 
 	flags = REG_EXTENDED | REG_NEWLINE;
 	if (g->setops & VI_IGNORECASE)
@@ -132,43 +122,57 @@ char_search(struct editor *g, char *p, const char *pat,
 
 	if (dir_and_range > 0) {
 		/* Forward: find first match at or after p. */
+		char *line;
 		region_end = full ? g->end - 1 : next_line(g, p);
-		for (line = p; line < region_end; line = next_line(g, eol)) {
+		for (line = p; line < region_end;) {
 			int eflags = 0;
+			int len = 0;
+			char *eol = end_line(g, line);
+			char *q = line;
 
-			eol = end_line(g, line);
 			if (eol > region_end)
 				eol = region_end;
-			save = *eol;
-			*eol = '\0';
-			if (line != g->text && line[-1] != '\n')
+			while (q < eol && len < VI_MAX_LINE) {
+				if (q == g->gap_start) { q = g->gap_end; continue; }
+				buf[len++] = *q++;
+			}
+			buf[len] = '\0';
+			if (line > g->text && buf_char_before(g, line) != '\n')
 				eflags = REG_NOTBOL;
-			if (regexec(&preg, line, 1, &m, eflags) == 0) {
-				result = line + m.rm_so;
-				*eol = save;
+			if (regexec(&preg, buf, 1, &m, eflags) == 0) {
+				result = phys_ptr(g, logical_pos(g, line) + (int)m.rm_so);
 				break;
 			}
-			*eol = save;
+			if (eol >= region_end)
+				break;
+			line = next_line(g, eol);
 		}
 	} else {
 		/* Backward: find last match before p. */
-		region_start = full ? g->text : prev_line(g, p);
-		for (line = region_start; line < p; line = next_line(g, eol)) {
-			eol = end_line(g, line);
-			seg_end = eol < p ? eol : p;
-			save = *seg_end;
-			*seg_end = '\0';
-			if (regexec(&preg, line, 1, &m, 0) == 0) {
-				/* Walk forward within segment; keep last match. */
-				cur = line;
-				do {
-					result = cur + m.rm_so;
-					cur = result +
-					    (m.rm_eo > m.rm_so ? m.rm_eo - m.rm_so : 1);
-				} while (cur < seg_end &&
-				         regexec(&preg, cur, 1, &m, REG_NOTBOL) == 0);
+		char *region_start = full ? g->text : prev_line(g, p);
+		char *line = region_start;
+		while (line < p) {
+			char *eol = end_line(g, line);
+			char *seg_end = (eol < p) ? eol : p;
+			int len = 0;
+			int pos = 0;
+			char *q = line;
+
+			while (q < seg_end && len < VI_MAX_LINE) {
+				if (q == g->gap_start) { q = g->gap_end; continue; }
+				buf[len++] = *q++;
 			}
-			*seg_end = save;
+			buf[len] = '\0';
+			if (regexec(&preg, buf, 1, &m, 0) == 0) {
+				do {
+					result = phys_ptr(g, logical_pos(g, line) + pos + (int)m.rm_so);
+					pos += (int)m.rm_so + (m.rm_eo > m.rm_so ? m.rm_eo - m.rm_so : 1);
+				} while (pos < len &&
+				         regexec(&preg, buf + pos, 1, &m, REG_NOTBOL) == 0);
+			}
+			if (eol >= p)
+				break;
+			line = next_line(g, eol);
 		}
 	}
 
@@ -214,7 +218,7 @@ make_word_search_pattern(struct editor *g, char dir_prefix,
 	while (end < g->end && *end != '\n' && is_word_byte((unsigned char)*end))
 		end = cp_next(g, end);
 
-	word_len = (size_t)(end - start);
+	word_len = (size_t)(logical_pos(g, end) - logical_pos(g, start));
 	/*
 	 * \< and \> are POSIX BRE word-boundary anchors whose definition of
 	 * "word character" is [[:alnum:]_] — ASCII-only in the C locale.
@@ -230,8 +234,13 @@ make_word_search_pattern(struct editor *g, char dir_prefix,
 		*dst++ = '\\';
 		*dst++ = '<';
 	}
-	memcpy(dst, start, word_len);
-	dst += word_len;
+	{
+		char *wp = start;
+		while (wp < end) {
+			if (wp == g->gap_start) { wp = g->gap_end; continue; }
+			*dst++ = *wp++;
+		}
+	}
 	if (whole_word) {
 		*dst++ = '\\';
 		*dst++ = '>';

@@ -19,6 +19,7 @@
 #include "motion.h"
 
 #include "codepoint.h"
+#include "gap.h"
 #include "input.h"
 #include "line.h"
 #include "undo.h"
@@ -34,7 +35,7 @@ dot_left(struct editor *g)
 	 */
 	undo_queue_commit(g);
 	g->dot = cp_start(g, g->dot);
-	if (g->dot > g->text && g->dot[-1] != '\n')
+	if (g->dot > g->text && buf_char_before(g, g->dot) != '\n')
 		g->dot = cp_prev(g, g->dot);
 }
 

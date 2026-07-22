@@ -204,7 +204,9 @@ struct cmd_ctx {
 
 struct editor {
 	/* --- Buffer (hot path — keep near top) --- */
-	char *text, *end; /* heap slab bounds */
+	char *text, *end; /* heap slab: text=base, end=text+text_size */
+	char *gap_start;  /* first byte of the gap */
+	char *gap_end;    /* first content byte after the gap */
 	char *dot;        /* current cursor position */
 	int text_size;    /* allocated capacity */
 
@@ -307,7 +309,7 @@ struct editor {
 		char undo_text[1];
 	} *undo_stack_tail;
 	struct undo_object *redo_stack_tail;
-	char *undo_queue_spos; /* start position of queued operation */
+	int undo_queue_spos; /* logical byte offset of queued operation start */
 	int undo_q;
 	char undo_queue[UNDO_QUEUE_MAX];
 

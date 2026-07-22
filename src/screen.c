@@ -24,6 +24,7 @@
 #include <regex.h>
 
 #include "codepoint.h"
+#include "gap.h"
 #include "line.h"
 #include "status.h"
 #include "term.h"
@@ -142,7 +143,9 @@ skip_line_to_offset(struct editor *g, char *src, int ofs,
 	 * Stops at the end of the buffer or at the line's newline.
 	 */
 	while (src < g->end && *src != '\n' && *co < ofs) {
-		unsigned char c = (unsigned char)*src;
+		unsigned char c;
+		if (src == g->gap_start) { src = g->gap_end; continue; }
+		c = (unsigned char)*src;
 
 		if (c >= ' ' && c < ASCII_DEL && c != '\t') {
 			char *run = src;
@@ -218,53 +221,54 @@ render_lnum(struct editor *g, char *dest, char *src,
 }
 
 static int
-scan_line_colors(const struct colorizer *colorizer, char *src, char *end,
-                 char *attrs, int *color_state)
+scan_line_colors(struct editor *g, const struct colorizer *colorizer,
+                 char *src, char *attrs, int *color_state)
 {
 	/*
 	 * == Colorize one source line and populate attrs[] ==
 	 *
-	 * Calls the colorizer's colorize() function on the slice [src, end).
-	 * Each byte in attrs[] receives one of the ATTR_* constants.  Updates
-	 * *color_state with the end-of-line colorizer state (needed because
-	 * multi-line constructs such as block comments span line boundaries).
-	 * Returns the number of bytes scanned (up to VI_MAX_LINE).
+	 * Copies line bytes to a contiguous temp buffer (skipping the gap),
+	 * then calls the colorizer.  Returns the logical byte count.
 	 */
+	char buf[VI_MAX_LINE];
 	int len = 0;
 	char *p = src;
 
-	while (p < end && *p != '\n' && len < VI_MAX_LINE) {
-		p++;
-		len++;
+	while (p < g->end && len < VI_MAX_LINE) {
+		if (p == g->gap_start) { p = g->gap_end; continue; }
+		if (*p == '\n') break;
+		buf[len++] = *p++;
 	}
-	*color_state = colorizer->colorize(*color_state, src, len, attrs);
+	*color_state = colorizer->colorize(*color_state, buf, len, attrs);
 	return len;
 }
 
 static void
-scan_line_highlight_attrs(const regex_t *re, const char *src, int len,
-                          char *attrs)
+scan_line_highlight_attrs(struct editor *g, const regex_t *re,
+                          const char *src, int len, char *attrs)
 {
 	/*
 	 * == Mark bytes inside /hlsearch matches on this line ==
 	 *
-	 * Copies [src, src+len) to a local NUL-terminated buffer, then runs
-	 * regexec in a forward loop, setting attrs[i]=1 for every byte that
-	 * falls within a match.  Zero-length matches advance by one byte to
-	 * avoid infinite loops.  Results overlay syntax-color attrs so
-	 * highlights take priority in the SGR selection logic.
+	 * Copies logical line bytes (skipping the gap) to a NUL-terminated
+	 * buffer, runs regexec, and populates attrs[] indexed by logical offset.
 	 */
 	char buf[VI_MAX_LINE + 1];
 	regmatch_t m;
 	int pos = 0;
+	int actual_len = 0;
+	const char *p = src;
 
 	if (len > VI_MAX_LINE)
 		len = VI_MAX_LINE;
-	memcpy(buf, src, (size_t)len);
-	buf[len] = '\0';
-	memset(attrs, 0, (size_t)len);
+	while (p < g->end && actual_len < len) {
+		if (p == g->gap_start) { p = g->gap_end; continue; }
+		buf[actual_len++] = *p++;
+	}
+	buf[actual_len] = '\0';
+	memset(attrs, 0, (size_t)actual_len);
 
-	while (pos < len) {
+	while (pos < actual_len) {
 		int flags = pos > 0 ? REG_NOTBOL : 0;
 		if (regexec(re, buf + pos, 1, &m, flags) != 0)
 			break;
@@ -274,8 +278,8 @@ scan_line_highlight_attrs(const regex_t *re, const char *src, int len,
 			pos = start + 1;
 			continue;
 		}
-		if (end > len)
-			end = len;
+		if (end > actual_len)
+			end = actual_len;
 		memset(attrs + start, 1, (size_t)(end - start));
 		pos = end;
 	}
@@ -340,7 +344,7 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 	}
 
 	if (colorizer) {
-		line_len = scan_line_colors(colorizer, line_start, g->end,
+		line_len = scan_line_colors(g, colorizer, line_start,
 		                            line_attrs, color_state);
 		/* Emit a reset at the start of each colored line. */
 		if (dest + 3 <= dest_end) {
@@ -351,13 +355,15 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 	if (hl_re) {
 		if (line_len == 0) {
 			const char *p = line_start;
-			while (p < g->end && *p != '\n' && line_len < VI_MAX_LINE) {
+			while (p < g->end && line_len < VI_MAX_LINE) {
+				if (p == g->gap_start) { p = g->gap_end; continue; }
+				if (*p == '\n') break;
 				p++;
 				line_len++;
 			}
 		}
 		if (line_len > 0)
-			scan_line_highlight_attrs(hl_re, line_start, line_len, hl_attrs);
+			scan_line_highlight_attrs(g, hl_re, line_start, line_len, hl_attrs);
 	}
 
 	co = 0;
@@ -404,7 +410,7 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 			              co >= bv_col_left && co <= bv_col_right) ? 1 : 0;
 		else
 			new_visual = (have_visual && src >= vstart && src <= vstop) ? 1 : 0;
-		byte_off = (int)(src - line_start);
+		byte_off = logical_pos(g, src) - logical_pos(g, line_start);
 		new_hl = (!new_visual && hl_re && byte_off < line_len &&
 		          hl_attrs[byte_off]) ? 1 : 0;
 		new_attr =
@@ -606,15 +612,21 @@ refresh(struct editor *g, int full_screen)
 	if (colorizer) {
 		char *p = g->text;
 		while (p < g->screenbegin && p < g->end) {
-			char *eol = memchr(p, '\n', (size_t)(g->end - p));
-			int llen;
-			if (eol == NULL || eol >= g->screenbegin)
-				eol = g->screenbegin;
-			llen = (int)(eol - p);
-			if (llen > VI_MAX_LINE)
-				llen = VI_MAX_LINE;
-			color_state = colorizer->colorize(color_state, p, llen, NULL);
-			p = eol + 1;
+			char buf[VI_MAX_LINE];
+			int llen = 0;
+			char *q = p;
+			while (q < g->end && llen < VI_MAX_LINE) {
+				if (q == g->gap_start) { q = g->gap_end; continue; }
+				if (*q == '\n' || q >= g->screenbegin) break;
+				buf[llen++] = *q++;
+			}
+			color_state = colorizer->colorize(color_state, buf, llen, NULL);
+			while (q < g->end) {
+				if (q == g->gap_start) { q = g->gap_end; continue; }
+				if (*q == '\n') { q = buf_next(g, q); break; }
+				q++;
+			}
+			p = q;
 		}
 	}
 
@@ -628,7 +640,7 @@ refresh(struct editor *g, int full_screen)
 			char *t = memchr(tp, '\n', g->end - tp);
 			if (!t)
 				t = g->end - 1;
-			tp = t + 1;
+			tp = buf_next(g, t);
 			line_no++;
 		}
 
