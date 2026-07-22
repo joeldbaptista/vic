@@ -9,9 +9,9 @@ The text buffer is a plain dynamic array — one contiguous heap slab. There
 is no gap buffer, no rope, no piece table. Rob Pike's rules apply: keep the
 data structure simple, and the algorithms follow naturally. `data/erv.txt`,
 a 31 000-line file included in the repository, edits responsively with no
-perceptible lag. For the actual use cases of `vic` — source files,
-configuration files, prose — the array is fast enough, and the complexity
-that a fancier structure would introduce is not justified.
+perceptible lag. For the actual use cases of `vic` — source files, configuration
+files, prose — the array is fast enough, and the complexity that a fancier 
+structure would introduce is not justified.
 
 ## Background
 
