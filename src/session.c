@@ -18,8 +18,8 @@
 #include "status.h"
 #include "term.h"
 
-#define INIT_TABSTOP		8
-#define SYNTAX_COLOURING 	0
+#define INIT_TABSTOP 8
+#define SYNTAX_COLOURING 0
 
 void
 run_cmds(struct editor *g, char *p)

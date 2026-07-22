@@ -123,30 +123,30 @@ enum {
 #define IS_RELATIVENUMBER(g) ((g)->setops & VI_RELATIVENUMBER)
 #define IS_SYNTAX(g) ((g)->setops & VI_SYNTAX)
 
-#define OPTS_STR           \
-	"ai\0"             \
-	"autoindent\0"     \
-	"et\0"             \
-	"expandtab\0"      \
-	"fl\0"             \
-	"flash\0"          \
-	"ic\0"             \
-	"ignorecase\0"     \
-	"sm\0"             \
-	"showmatch\0"      \
-	"ts\0"             \
-	"tabstop\0"        \
-	"cshp\0"           \
-	"cursorshape\0"    \
-	"nu\0"             \
-	"number\0"         \
-	"rnu\0"            \
-	"relativenumber\0" \
-	"uf\0"             \
-	"undofile\0"       \
-	"cshpi\0"          \
+#define OPTS_STR              \
+	"ai\0"                \
+	"autoindent\0"        \
+	"et\0"                \
+	"expandtab\0"         \
+	"fl\0"                \
+	"flash\0"             \
+	"ic\0"                \
+	"ignorecase\0"        \
+	"sm\0"                \
+	"showmatch\0"         \
+	"ts\0"                \
+	"tabstop\0"           \
+	"cshp\0"              \
+	"cursorshape\0"       \
+	"nu\0"                \
+	"number\0"            \
+	"rnu\0"               \
+	"relativenumber\0"    \
+	"uf\0"                \
+	"undofile\0"          \
+	"cshpi\0"             \
 	"cursorshapeinsert\0" \
-	"syn\0"            \
+	"syn\0"               \
 	"syntax\0"
 
 #define SET_READONLY_FILE(flags) ((flags) |= 0x01)

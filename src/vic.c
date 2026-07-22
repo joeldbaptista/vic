@@ -1,12 +1,12 @@
 #define _GNU_SOURCE
 #include "vic.h"
 #include "buffer.h"
-#include "gap.h"
 #include "codepoint.h"
 #include "context.h"
 #include "editcmd.h"
 #include "ex.h"
 #include "excore.h"
+#include "gap.h"
 #include "input.h"
 #include "line.h"
 #include "motion.h"

@@ -144,7 +144,10 @@ skip_line_to_offset(struct editor *g, char *src, int ofs,
 	 */
 	while (src < g->end && *src != '\n' && *co < ofs) {
 		unsigned char c;
-		if (src == g->gap_start) { src = g->gap_end; continue; }
+		if (src == g->gap_start) {
+			src = g->gap_end;
+			continue;
+		}
 		c = (unsigned char)*src;
 
 		if (c >= ' ' && c < ASCII_DEL && c != '\t') {
@@ -235,8 +238,12 @@ scan_line_colors(struct editor *g, const struct colorizer *colorizer,
 	char *p = src;
 
 	while (p < g->end && len < VI_MAX_LINE) {
-		if (p == g->gap_start) { p = g->gap_end; continue; }
-		if (*p == '\n') break;
+		if (p == g->gap_start) {
+			p = g->gap_end;
+			continue;
+		}
+		if (*p == '\n')
+			break;
 		buf[len++] = *p++;
 	}
 	*color_state = colorizer->colorize(*color_state, buf, len, attrs);
@@ -262,7 +269,10 @@ scan_line_highlight_attrs(struct editor *g, const regex_t *re,
 	if (len > VI_MAX_LINE)
 		len = VI_MAX_LINE;
 	while (p < g->end && actual_len < len) {
-		if (p == g->gap_start) { p = g->gap_end; continue; }
+		if (p == g->gap_start) {
+			p = g->gap_end;
+			continue;
+		}
 		buf[actual_len++] = *p++;
 	}
 	buf[actual_len] = '\0';
@@ -356,8 +366,12 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 		if (line_len == 0) {
 			const char *p = line_start;
 			while (p < g->end && line_len < VI_MAX_LINE) {
-				if (p == g->gap_start) { p = g->gap_end; continue; }
-				if (*p == '\n') break;
+				if (p == g->gap_start) {
+					p = g->gap_end;
+					continue;
+				}
+				if (*p == '\n')
+					break;
 				p++;
 				line_len++;
 			}
@@ -391,9 +405,10 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 			unsigned char fb = (unsigned char)*src;
 			if (fb >= 0x80) {
 				size_t have = (size_t)(next - src);
-				size_t need = fb < 0xC0 ? 0
-				            : fb < 0xE0 ? 2
-				            : fb < 0xF0 ? 3 : 4;
+				size_t need = fb < 0xC0   ? 0
+				              : fb < 0xE0 ? 2
+				              : fb < 0xF0 ? 3
+				                          : 4;
 				if (need == 0 || have < need) {
 					src = next;
 					continue;
@@ -407,12 +422,16 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 
 		if (have_block_visual)
 			new_visual = (src >= bv_row_top && src <= bv_row_bot_end &&
-			              co >= bv_col_left && co <= bv_col_right) ? 1 : 0;
+			              co >= bv_col_left && co <= bv_col_right)
+			                 ? 1
+			                 : 0;
 		else
 			new_visual = (have_visual && src >= vstart && src <= vstop) ? 1 : 0;
 		byte_off = logical_pos(g, src) - logical_pos(g, line_start);
 		new_hl = (!new_visual && hl_re && byte_off < line_len &&
-		          hl_attrs[byte_off]) ? 1 : 0;
+		          hl_attrs[byte_off])
+		             ? 1
+		             : 0;
 		new_attr =
 		    (colorizer && byte_off < line_len) ? line_attrs[byte_off] : ATTR_NORMAL;
 
@@ -616,14 +635,24 @@ refresh(struct editor *g, int full_screen)
 			int llen = 0;
 			char *q = p;
 			while (q < g->end && llen < VI_MAX_LINE) {
-				if (q == g->gap_start) { q = g->gap_end; continue; }
-				if (*q == '\n' || q >= g->screenbegin) break;
+				if (q == g->gap_start) {
+					q = g->gap_end;
+					continue;
+				}
+				if (*q == '\n' || q >= g->screenbegin)
+					break;
 				buf[llen++] = *q++;
 			}
 			color_state = colorizer->colorize(color_state, buf, llen, NULL);
 			while (q < g->end) {
-				if (q == g->gap_start) { q = g->gap_end; continue; }
-				if (*q == '\n') { q = buf_next(g, q); break; }
+				if (q == g->gap_start) {
+					q = g->gap_end;
+					continue;
+				}
+				if (*q == '\n') {
+					q = buf_next(g, q);
+					break;
+				}
 				q++;
 			}
 			p = q;

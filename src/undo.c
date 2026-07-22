@@ -36,15 +36,16 @@ gap_flush_all(struct editor *g)
 	 * `start` offset can be used as a flat physical offset.
 	 */
 	int ldot = logical_pos(g, g->dot);
-	int lsb  = logical_pos(g, g->screenbegin);
+	int lsb = logical_pos(g, g->screenbegin);
 	int lmarks[30], mi;
 	for (mi = 0; mi < 30; mi++)
 		lmarks[mi] = g->mark[mi] ? logical_pos(g, g->mark[mi]) : -1;
 	gap_flush(g);
-	g->dot        = phys_ptr(g, ldot);
+	g->dot = phys_ptr(g, ldot);
 	g->screenbegin = phys_ptr(g, lsb);
 	for (mi = 0; mi < 30; mi++)
-		if (lmarks[mi] >= 0) g->mark[mi] = phys_ptr(g, lmarks[mi]);
+		if (lmarks[mi] >= 0)
+			g->mark[mi] = phys_ptr(g, lmarks[mi]);
 }
 
 static void

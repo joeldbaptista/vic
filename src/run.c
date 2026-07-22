@@ -189,11 +189,11 @@ run_trimsel(struct editor *g, int argc, char *argv[],
 
 	/* Use exact visual marks when available. */
 	start = g->mark[MARK_LT] ? g->mark[MARK_LT] : rs;
-	end   = g->mark[MARK_GT] ? g->mark[MARK_GT] : re;
+	end = g->mark[MARK_GT] ? g->mark[MARK_GT] : re;
 	if (start > end) {
 		char *tmp = start;
 		start = end;
-		end   = tmp;
+		end = tmp;
 	}
 
 	if (mode == 0 || mode == 1) {
@@ -214,9 +214,11 @@ run_trimsel(struct editor *g, int argc, char *argv[],
 
 	{
 		char *sel_start = g->mark[MARK_LT] ? g->mark[MARK_LT] : rs;
-		char *sel_end   = g->mark[MARK_GT] ? g->mark[MARK_GT] : re;
+		char *sel_end = g->mark[MARK_GT] ? g->mark[MARK_GT] : re;
 		if (sel_start > sel_end) {
-			char *tmp = sel_start; sel_start = sel_end; sel_end = tmp;
+			char *tmp = sel_start;
+			sel_start = sel_end;
+			sel_end = tmp;
 		}
 		if (start > sel_start || end < sel_end) {
 			int new_len = (int)(end - start + 1);
@@ -1562,7 +1564,7 @@ run_dispatch(struct editor *g, int argc, char *argv[],
 	lrs = logical_pos(g, rs);
 	lre = logical_pos(g, re);
 	ldot = logical_pos(g, g->dot);
-	lsb  = logical_pos(g, g->screenbegin);
+	lsb = logical_pos(g, g->screenbegin);
 	for (mi = 0; mi < 30; mi++)
 		lmarks[mi] = g->mark[mi] ? logical_pos(g, g->mark[mi]) : -1;
 
@@ -1573,7 +1575,8 @@ run_dispatch(struct editor *g, int argc, char *argv[],
 	g->dot = phys_ptr(g, ldot);
 	g->screenbegin = phys_ptr(g, lsb);
 	for (mi = 0; mi < 30; mi++)
-		if (lmarks[mi] >= 0) g->mark[mi] = phys_ptr(g, lmarks[mi]);
+		if (lmarks[mi] >= 0)
+			g->mark[mi] = phys_ptr(g, lmarks[mi]);
 
 	for (i = 0; run_table[i].name != NULL; i++) {
 		if (strcmp(run_table[i].name, argv[0]) == 0) {

@@ -90,17 +90,19 @@ gap_grow(struct editor *g, char **pp, int needed)
 	}
 
 	new_text = xrealloc(g->text, (size_t)new_size);
-	bias  = (uintptr_t)(new_text - g->text);
+	bias = (uintptr_t)(new_text - g->text);
 	delta = new_size - g->text_size;
 
 	/* Bias-adjust all interior pointers. */
-	g->dot        += bias;
-	g->screenbegin+= bias;
-	if (g->visual_anchor) g->visual_anchor += bias;
-	if (g->rstart)        g->rstart        += bias;
+	g->dot += bias;
+	g->screenbegin += bias;
+	if (g->visual_anchor)
+		g->visual_anchor += bias;
+	if (g->rstart)
+		g->rstart += bias;
 	/* undo_queue_spos is now a logical int, no adjustment needed */
-	g->gap_start  += bias;
-	g->gap_end    += bias;
+	g->gap_start += bias;
+	g->gap_end += bias;
 	for (i = 0; i < (int)ARRAY_SIZE(g->mark); i++)
 		if (g->mark[i])
 			g->mark[i] += bias;
@@ -108,24 +110,29 @@ gap_grow(struct editor *g, char **pp, int needed)
 	g->text = new_text;
 
 	/* Post-gap pointers also shift by delta (content moves to end). */
-	if (g->dot >= g->gap_end) g->dot += delta;
-	if (g->screenbegin >= g->gap_end) g->screenbegin += delta;
-	if (g->visual_anchor && g->visual_anchor >= g->gap_end) g->visual_anchor += delta;
-	if (g->rstart && g->rstart >= g->gap_end) g->rstart += delta;
+	if (g->dot >= g->gap_end)
+		g->dot += delta;
+	if (g->screenbegin >= g->gap_end)
+		g->screenbegin += delta;
+	if (g->visual_anchor && g->visual_anchor >= g->gap_end)
+		g->visual_anchor += delta;
+	if (g->rstart && g->rstart >= g->gap_end)
+		g->rstart += delta;
 	/* undo_queue_spos is now a logical int, no adjustment needed */
 	for (i = 0; i < (int)ARRAY_SIZE(g->mark); i++)
 		if (g->mark[i] && g->mark[i] >= g->gap_end)
 			g->mark[i] += delta;
-	if (*pp >= g->gap_end) *pp += delta;
+	if (*pp >= g->gap_end)
+		*pp += delta;
 
 	/* Move after-gap content to the end of the new (larger) allocation. */
 	char *new_gap_end = g->text + new_size - after_size;
 	memmove(new_gap_end, g->gap_end, (size_t)after_size);
 	memset(g->gap_end, 0, (size_t)(new_gap_end - g->gap_end));
 
-	g->gap_end    = new_gap_end;
-	g->text_size  = new_size;
-	g->end        = g->text + new_size;
+	g->gap_end = new_gap_end;
+	g->text_size = new_size;
+	g->end = g->text + new_size;
 
 	return bias;
 }
@@ -150,7 +157,7 @@ gap_flush(struct editor *g)
 		       (size_t)(g->gap_end - g->gap_start));
 	}
 	g->gap_start += after_size;
-	g->gap_end    = g->end;
+	g->gap_end = g->end;
 }
 
 uintptr_t
@@ -199,7 +206,11 @@ text_hole_delete(struct editor *g, char *p, char *q, int undo)
 	/* Normalise to logical offsets so gap movement doesn't invalidate q. */
 	lp = logical_pos(g, p);
 	lq = logical_pos(g, q);
-	if (lq < lp) { int tmp = lp; lp = lq; lq = tmp; }
+	if (lq < lp) {
+		int tmp = lp;
+		lp = lq;
+		lq = tmp;
+	}
 	hole_size = lq - lp + 1;
 
 	/* Move gap to deletion start so the bytes to delete are contiguous at
@@ -475,8 +486,8 @@ init_text_buffer(struct editor *g, char *fn)
 	g->text = xzalloc((size_t)g->text_size);
 	/* Gap spans the whole allocation; content is empty. */
 	g->gap_start = g->text;
-	g->gap_end   = g->text + g->text_size;
-	g->end       = g->text + g->text_size;
+	g->gap_end = g->text + g->text_size;
+	g->end = g->text + g->text_size;
 	g->screenbegin = g->dot = g->text;
 
 	update_filename(g, fn);
@@ -544,7 +555,8 @@ file_write(struct editor *g, char *fn, char *first, char *last)
 		cnt = (int)(seg_end - first + 1);
 		if (cnt > 0) {
 			int w = (int)full_write(fd, first, (size_t)cnt);
-			if (w != cnt) goto short_write;
+			if (w != cnt)
+				goto short_write;
 			charcnt += w;
 		}
 	}
@@ -555,7 +567,8 @@ file_write(struct editor *g, char *fn, char *first, char *last)
 		if (seg_start <= last) {
 			cnt = (int)(last - seg_start + 1);
 			int w = (int)full_write(fd, seg_start, (size_t)cnt);
-			if (w != cnt) goto short_write;
+			if (w != cnt)
+				goto short_write;
 			charcnt += w;
 		}
 	}

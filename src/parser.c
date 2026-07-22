@@ -9,9 +9,9 @@
 
 /* composite keys; e.g. `gg`, `g*`, etc */
 struct op2_rule {
-	char op; /* prefix */
+	char op;         /* prefix */
 	const char *set; /* follow up */
-	int nl_ok; /* is enter accepted? */
+	int nl_ok;       /* is enter accepted? */
 };
 
 static int
@@ -207,11 +207,11 @@ parse(struct parser *s, int c)
 			s->stg = STG_RANGE;
 			continue;
 		case STG_RANGE:
-			if (in_set(c, "wWeEbBdyc<>"   /* characterwise */
+			if (in_set(c, "wWeEbBdyc<>"  /* characterwise */
 			              "^$%0hnN|{} l" /* more characterwise (incl. space, l) */
 			              "\x08\x7f"     /* BS, DEL */
-			              "GHL+-jk\r\n" /* linewise */
-			              )) { /* anchor-less ranges */
+			              "GHL+-jk\r\n"  /* linewise */
+			           )) {              /* anchor-less ranges */
 				s->rg = (char)c;
 				s->ok = 1;
 				return 1;

@@ -72,7 +72,10 @@ visual_block_insert_replay(struct editor *g)
 		int j = 0;
 		insert_text = xmalloc((size_t)insert_len + 1);
 		while (wp != end_ptr && j < insert_len) {
-			if (wp == g->gap_start) { wp = g->gap_end; continue; }
+			if (wp == g->gap_start) {
+				wp = g->gap_end;
+				continue;
+			}
 			insert_text[j++] = *wp++;
 		}
 		insert_text[j] = '\0';
@@ -247,10 +250,10 @@ block_visual_cols(struct editor *g, int *col_left, int *col_right,
 	int ca = get_column(g, a);
 	int cb = get_column(g, b);
 
-	*col_left  = ca < cb ? ca : cb;
+	*col_left = ca < cb ? ca : cb;
 	*col_right = ca < cb ? cb : ca;
-	*row_top   = begin_line(g, a < b ? a : b);
-	*row_bot   = begin_line(g, a < b ? b : a);
+	*row_top = begin_line(g, a < b ? a : b);
+	*row_bot = begin_line(g, a < b ? b : a);
 }
 
 struct block_range *
@@ -393,13 +396,17 @@ visual_apply_operator(struct editor *g, int op)
 
 			for (i = 0; i < count; i++)
 				total += (size_t)(logical_pos(g, ranges[i].q) -
-				                  logical_pos(g, ranges[i].p)) + 1;
+				                  logical_pos(g, ranges[i].p)) +
+				         1;
 			buf = xmalloc(total + 1);
 			dst = buf;
 			for (i = 0; i < count; i++) {
 				char *wp = ranges[i].p;
 				while (wp < ranges[i].q) {
-					if (wp == g->gap_start) { wp = g->gap_end; continue; }
+					if (wp == g->gap_start) {
+						wp = g->gap_end;
+						continue;
+					}
 					*dst++ = *wp++;
 				}
 				*dst++ = '\n';
@@ -422,7 +429,7 @@ visual_apply_operator(struct editor *g, int op)
 			char *p;
 			int lranges_p[count], lranges_q[count];
 			int ldot, lscreenbegin;
-			int mi, nmarks2 = (int)(sizeof(g->mark)/sizeof(g->mark[0]));
+			int mi, nmarks2 = (int)(sizeof(g->mark) / sizeof(g->mark[0]));
 			int lmarks2[nmarks2];
 
 			for (i = 0; i < count; i++) {
@@ -441,7 +448,8 @@ visual_apply_operator(struct editor *g, int op)
 				ranges[i].q = phys_ptr(g, lranges_q[i]);
 			}
 			for (mi = 0; mi < nmarks2; mi++)
-				if (lmarks2[mi] >= 0) g->mark[mi] = phys_ptr(g, lmarks2[mi]);
+				if (lmarks2[mi] >= 0)
+					g->mark[mi] = phys_ptr(g, lmarks2[mi]);
 
 			span_start = ranges[0].p;
 			span_end = ranges[count - 1].q - 1;
@@ -552,7 +560,7 @@ visual_apply_operator(struct editor *g, int op)
 		int lstop = logical_pos(g, stop);
 		int ldot2 = logical_pos(g, g->dot);
 		int lscreenbegin2 = logical_pos(g, g->screenbegin);
-		int mi, nmarks = (int)(sizeof(g->mark)/sizeof(g->mark[0]));
+		int mi, nmarks = (int)(sizeof(g->mark) / sizeof(g->mark[0]));
 		int lmarks[nmarks];
 		char *p;
 		for (mi = 0; mi < nmarks; mi++)
@@ -563,7 +571,8 @@ visual_apply_operator(struct editor *g, int op)
 		g->dot = phys_ptr(g, ldot2);
 		g->screenbegin = phys_ptr(g, lscreenbegin2);
 		for (mi = 0; mi < nmarks; mi++)
-			if (lmarks[mi] >= 0) g->mark[mi] = phys_ptr(g, lmarks[mi]);
+			if (lmarks[mi] >= 0)
+				g->mark[mi] = phys_ptr(g, lmarks[mi]);
 
 		undo_push(g, start, (unsigned)(stop - start + 1), UNDO_SWAP);
 

@@ -13,8 +13,8 @@
 #include "ex.h"
 
 #include "buffer.h"
-#include "gap.h"
 #include "excore.h"
+#include "gap.h"
 #include "line.h"
 #include "motion.h"
 #include "operator.h"
@@ -274,7 +274,10 @@ regex_search(struct editor *g, char *q, regex_t *preg,
 
 		/* Copy line content to tmp, skipping gap bytes. */
 		while (wp < eol && tmplen < VI_MAX_LINE) {
-			if (wp == g->gap_start) { wp = g->gap_end; continue; }
+			if (wp == g->gap_start) {
+				wp = g->gap_end;
+				continue;
+			}
 			tmp[tmplen++] = *wp++;
 		}
 		tmp[tmplen] = '\0';
@@ -411,7 +414,10 @@ global(struct editor *g, char *p, int invert, int b, int e,
 
 		/* Copy line content gap-free for regex. */
 		while (wp < eol && tmplen < VI_MAX_LINE) {
-			if (wp == g->gap_start) { wp = g->gap_end; continue; }
+			if (wp == g->gap_start) {
+				wp = g->gap_end;
+				continue;
+			}
 			tmp[tmplen++] = *wp++;
 		}
 		tmp[tmplen] = '\0';
@@ -844,8 +850,8 @@ colon_do_read(struct editor *g, const struct colon_state *cs)
 
 	if (cs->args[0] == '!' || cs->useforce) {
 		const char *shell_cmd = cs->args[0] == '!'
-		    ? skip_whitespace(cs->args + 1)
-		    : cs->args;
+		                            ? skip_whitespace(cs->args + 1)
+		                            : cs->args;
 		colon_do_read_cmd(g, cs->e, cs->got, shell_cmd);
 		return;
 	}
@@ -1038,7 +1044,7 @@ colon_do_substitute(struct editor *g, const struct colon_state *cs)
 			uintptr_t bias;
 			if (len_F)
 				text_hole_delete(g, found,
-				    phys_ptr(g, logical_pos(g, found) + (int)len_F - 1),
+				                 phys_ptr(g, logical_pos(g, found) + (int)len_F - 1),
 				                 undo++ ? ALLOW_UNDO_CHAIN : ALLOW_UNDO);
 			if (len_R != 0) {
 				bias = string_insert(g, found, R,

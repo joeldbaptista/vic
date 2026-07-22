@@ -310,14 +310,21 @@ parse_tag_at(struct editor *g, char *lt, char **gt,
 
 	*name_start = p;
 	while (p < g->end) {
-		if (p == g->gap_start) { p = g->gap_end; continue; }
-		if (!is_tag_name_char((unsigned char)*p)) break;
+		if (p == g->gap_start) {
+			p = g->gap_end;
+			continue;
+		}
+		if (!is_tag_name_char((unsigned char)*p))
+			break;
 		p++;
 	}
 	*name_len = (size_t)(logical_pos(g, p) - logical_pos(g, *name_start));
 
 	while (p < g->end) {
-		if (p == g->gap_start) { p = g->gap_end; continue; }
+		if (p == g->gap_start) {
+			p = g->gap_end;
+			continue;
+		}
 		if (in_quote) {
 			if (*p == quote && !is_escaped_quote(g, p))
 				in_quote = 0;

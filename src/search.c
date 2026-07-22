@@ -133,7 +133,10 @@ char_search(struct editor *g, char *p, const char *pat,
 			if (eol > region_end)
 				eol = region_end;
 			while (q < eol && len < VI_MAX_LINE) {
-				if (q == g->gap_start) { q = g->gap_end; continue; }
+				if (q == g->gap_start) {
+					q = g->gap_end;
+					continue;
+				}
 				buf[len++] = *q++;
 			}
 			buf[len] = '\0';
@@ -159,7 +162,10 @@ char_search(struct editor *g, char *p, const char *pat,
 			char *q = line;
 
 			while (q < seg_end && len < VI_MAX_LINE) {
-				if (q == g->gap_start) { q = g->gap_end; continue; }
+				if (q == g->gap_start) {
+					q = g->gap_end;
+					continue;
+				}
 				buf[len++] = *q++;
 			}
 			buf[len] = '\0';
@@ -237,7 +243,10 @@ make_word_search_pattern(struct editor *g, char dir_prefix,
 	{
 		char *wp = start;
 		while (wp < end) {
-			if (wp == g->gap_start) { wp = g->gap_end; continue; }
+			if (wp == g->gap_start) {
+				wp = g->gap_end;
+				continue;
+			}
 			*dst++ = *wp++;
 		}
 	}
