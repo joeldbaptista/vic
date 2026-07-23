@@ -271,7 +271,3 @@ make check-sanitizers-pty    # same under ASan and UBSan
 Tests drive a real `vic` process through a pseudo-terminal, write the
 result to disk with `:w`, and assert file content. The process exit code is
 not the test signal — file content is.
-
-## License
-
-Derived from BusyBox vi. GPLv2.
