@@ -402,9 +402,9 @@ basename_of(const char *path)
 	return p ? p + 1 : path;
 }
 
-#define STARTUP_TIMEOUT 2.50  /* wait up to 2.5s for filename in output */
-#define STARTUP_SETTLE  0.60  /* additional settle after filename appears */
-#define FINISH_TIMEOUT  5.00  /* wait up to 5s for process to exit */
+#define STARTUP_TIMEOUT 2.50 /* wait up to 2.5s for filename in output */
+#define STARTUP_SETTLE 0.60  /* additional settle after filename appears */
+#define FINISH_TIMEOUT 5.00  /* wait up to 5s for process to exit */
 
 /* ------------------------------------------------------------------ */
 /* file-content test runner                                             */
@@ -574,9 +574,9 @@ run_number_toggle(const char *vi_path, const char *tmp_dir)
 
 	rendered = strip_ansi(out.data, out.len);
 
-	regcomp(&re_nu,    "(^|[^0-9])1 +alpha",  REG_EXTENDED | REG_NEWLINE);
-	regcomp(&re_tilde, "[0-9]+[[:space:]]+~",  REG_EXTENDED | REG_NEWLINE);
-	has_nu_effect     = (regexec(&re_nu,    rendered, 0, NULL, 0) == 0);
+	regcomp(&re_nu, "(^|[^0-9])1 +alpha", REG_EXTENDED | REG_NEWLINE);
+	regcomp(&re_tilde, "[0-9]+[[:space:]]+~", REG_EXTENDED | REG_NEWLINE);
+	has_nu_effect = (regexec(&re_nu, rendered, 0, NULL, 0) == 0);
 	no_numbered_tilde = (regexec(&re_tilde, rendered, 0, NULL, 0) != 0);
 	regfree(&re_nu);
 	regfree(&re_tilde);
@@ -605,9 +605,9 @@ static int
 run_visual_highlight(const char *vi_path, const char *tmp_dir)
 {
 	const char *name = "visual-highlight-render";
-	const char *inv_on  = "\x1b[7m";
+	const char *inv_on = "\x1b[7m";
 	const char *inv_off = "\x1b[m";
-	size_t on_len  = 4; /* \x1b [ 7 m */
+	size_t on_len = 4;  /* \x1b [ 7 m */
 	size_t off_len = 3; /* \x1b [ m   */
 	char path[512];
 	int master, rc, timed_out, ok;
@@ -778,7 +778,10 @@ run_block_visual_highlight_c(const char *vi_path, const char *tmp_dir)
 	if (master < 0)
 		return 0;
 	pid = spawn_vic(master, vi_path, path);
-	if (pid < 0) { close(master); return 0; }
+	if (pid < 0) {
+		close(master);
+		return 0;
+	}
 
 	buf_init(&out);
 	wait_startup(master, pid, &out, basename_of(path), STARTUP_TIMEOUT);
@@ -802,13 +805,18 @@ run_block_visual_highlight_c(const char *vi_path, const char *tmp_dir)
 	if (master < 0)
 		return has_preproc; /* partial result */
 	pid = spawn_vic(master, vi_path, path);
-	if (pid < 0) { close(master); return has_preproc; }
+	if (pid < 0) {
+		close(master);
+		return has_preproc;
+	}
 
 	buf_init(&out);
 	wait_startup(master, pid, &out, basename_of(path), STARTUP_TIMEOUT);
 	pump_output(master, pid, &out, STARTUP_SETTLE);
 	/* go to col 1 (the '*'), Ctrl-V, then 2j: block on '*' of all 3 lines */
-	write_all(master, (const unsigned char *)"0l\x16" "2j", 5);
+	write_all(master, (const unsigned char *)"0l\x16"
+	                                         "2j",
+	          5);
 	pump_output(master, pid, &out, 0.35);
 
 	has_comment = (xmemmem(out.data, out.len,
@@ -849,121 +857,128 @@ struct tc {
 
 /* TC: build a struct tc from a string literal for keys. */
 #define TC(n, k, s, e) \
-	{ n, (const unsigned char *)(k), sizeof(k) - 1, s, e }
+	{n, (const unsigned char *)(k), sizeof(k) - 1, s, e}
 
 static const struct tc cases[] = {
-	/* * # g* g# word search */
-	TC("star",  "*x:write\r",   "foo one\nfoo two\nfoo three\n", "foo one\noo two\nfoo three\n"),
-	TC("hash",  "jj#x:write\r", "foo one\nfoo two\nfoo three\n", "foo one\noo two\nfoo three\n"),
-	TC("gstar", "g*x:write\r",  "foo\nzfooz\nfoo\n",             "foo\nzooz\nfoo\n"),
-	TC("ghash", "G0g#x:write\r","foo\nzfooz\nfoo\n",             "foo\nzooz\nfoo\n"),
-	/* j/k and arrow keys preserve column; CR/- go to first non-blank */
-	TC("j-keep-col",          "jiX\x1b:write\r",       "top\n    mid\nbottom\n", "top\nX    mid\nbottom\n"),
-	TC("k-keep-col",          "GkiX\x1b:write\r",      "top\n    mid\nbottom\n", "top\nX    mid\nbottom\n"),
-	TC("down-keep-col",       "\x1b[BiX\x1b:write\r",  "top\n    mid\nbottom\n", "top\nX    mid\nbottom\n"),
-	TC("up-keep-col",         "G\x1b[AiX\x1b:write\r", "top\n    mid\nbottom\n", "top\nX    mid\nbottom\n"),
-	/* sticky column survives j through a short line — cursor was at col 3,
-	 * the middle row "kl" only reaches col 1, but the second j must still
-	 * land at col 3 on the third row, not at col 1 */
-	TC("j-sticky-col-through-short", "0llljjiX\x1b:write\r",
-	   "abcde\nkl\npqrst\n", "abcde\nkl\npqrXst\n"),
-	TC("k-sticky-col-through-short", "GlllkkiX\x1b:write\r",
-	   "pqrst\nkl\nabcde\n", "pqrXst\nkl\nabcde\n"),
-	/* visual mode */
-	TC("visual-char-delete",      "vld:write\r",       "abcde\n",    "cde\n"),
-	TC("visual-line-delete",      "Vjd:write\r",       "one\ntwo\nthree\n", "three\n"),
-	TC("visual-put-replace",      "ywj0vllp:write\r",  "foo\nbar\n", "foo\nfoo\n"),
-	TC("visual-textobj-vi-paren", "f(lvi(d:write\r",   "x (abc) y\n","x () y\n"),
-	TC("visual-textobj-va-paren", "f(lva(d:write\r",   "x (abc) y\n","x  y\n"),
-	TC("visual-textobj-viw",      "wviwd:write\r",     "one two three\n", "one  three\n"),
-	TC("visual-textobj-vi-quote", "f\"lvi\"d:write\r", "x \"abc\" y\n", "x \"\" y\n"),
-	TC("visual-textobj-vit",      "f>lvitd:write\r",   "<p>hello</p>\n", "<p></p>\n"),
-	/* count-prefixed motion */
-	TC("count-motion-3j",  "3jx:write\r",    "one\ntwo\nthree\nfour\nfive\n", "one\ntwo\nthree\nour\nfive\n"),
-	/* operator + motion */
-	TC("operator-dw",   "dw:write\r",    "foo bar\n",     "bar\n"),
-	TC("operator-d2w",  "d2w:write\r",   "foo bar baz\n", "baz\n"),
-	TC("operator-dd",   "dd:write\r",    "one\ntwo\nthree\n", "two\nthree\n"),
-	TC("operator-yyp",  "yyp:write\r",   "foo\nbar\n",    "foo\nfoo\nbar\n"),
-	TC("operator-cc",   "ccnew\x1b:write\r", "foo\nbar\n","new\nbar\n"),
-	/* named registers */
-	TC("register-yank-put", "\"ayyj\"ap:write\r", "foo\nbar\n", "foo\nbar\nfoo\n"),
-	/* shift */
-	TC("shift-right",        ">>:write\r",    "foo\n",                  "\tfoo\n"),
-	TC("shift-left",         "<<:write\r",    "\tfoo\n",                "foo\n"),
-	TC("shift-right-motion",  ">3j:write\r",       "a\nb\nc\nd\ne\n",   "\ta\n\tb\n\tc\n\td\ne\n"),
-	TC("shift-left-motion",   "<2j:write\r",       "\ta\n\tb\n\tc\nd\n","a\nb\nc\nd\n"),
-	TC("shift-right-visual",  "Vjj>:write\r",      "a\nb\nc\nd\n",      "\ta\n\tb\n\tc\nd\n"),
-	TC("shift-left-visual",   "Vjj<:write\r",      "\ta\n\tb\n\tc\nd\n","a\nb\nc\nd\n"),
-	/* ZZ write-and-quit */
-	TC("zz-write-quit", "xZZ", "hello\n", "ello\n"),
-	/* dot repeat */
-	TC("dot-repeat-dw",           "dw.:write\r",          "foo bar baz\n", "baz\n"),
-	TC("dot-repeat-dd",           "dd.:write\r",          "one\ntwo\nthree\n", "three\n"),
-	TC("dot-repeat-shift",        ">>.:write\r",          "foo\n",         "\t\tfoo\n"),
-	TC("dot-repeat-replace-char", "r,l.:write\r",         "abcde\n",       ",,cde\n"),
-	TC("dot-repeat-cc",           "ccnew\x1bj.:write\r",  "old\ntext\n",   "new\nnew\n"),
-	TC("dot-repeat-ciw",          "wciwnew\x1b" "0.:write\r","foo bar\n",   "new new\n"),
-	/* undo / redo */
-	TC("undo-x",  "xu:write\r",     "hello\n",    "hello\n"),
-	TC("undo-dd", "ddu:write\r",    "one\ntwo\n", "one\ntwo\n"),
-	TC("redo-x",  "xu\x12:write\r", "hello\n",    "ello\n"),
-	/* search — ERE quantifier: ? matches zero or one */
-	TC("search-ere-optional", "/ab?c\rx:write\r", "ab\nabc\n", "ab\nbc\n"),
-	/* search — ERE quantifier: + matches one or more */
-	TC("search-ere-plus",     "/go+\rx:write\r",  "g\ngo\ngoo\n", "g\no\ngoo\n"),
-	TC("search-forward",  "/bar\rx:write\r",    "foo\nbar\nbaz\n",     "foo\nar\nbaz\n"),
-	TC("search-backward", "G?foo\rx:write\r",   "foo\nbar\nfoo\n",     "oo\nbar\nfoo\n"),
-	TC("search-n-repeat", "/bar\rnx:write\r",   "foo\nbar\nbaz\nbar\n","foo\nbar\nbaz\nar\n"),
-	/* marks */
-	TC("mark-set-jump",   "mamajj'ax:write\r",  "one\ntwo\nthree\n",  "ne\ntwo\nthree\n"),
-	TC("colon-mark",      ":mark a\rjj'ax:write\r", "one\ntwo\nthree\n", "ne\ntwo\nthree\n"),
-	TC("colon-mark-addr", ":2mark b\r'bx:write\r",  "one\ntwo\nthree\n", "one\nwo\nthree\n"),
-	/* replace mode */
-	TC("replace-mode", "RXY\x1b:write\r", "abcde\n", "XYcde\n"),
-	/* clipboard register */
-	TC("visual-shared-yank-put", "viw+yj$+p:write\r", "abc\ndef\n", "abc\ndefabc\n"),
-	/* block visual — column-preserving j/k (the \x16 is Ctrl-V) */
-	/* anchor=col3, 4 right moves → cols 3-7 deleted on each row */
-	TC("visual-block-delete",    "0lll\x16jlllld:write\r", "abcdefghij\nklmnopqrst\n", "abcij\nklmst\n"),
-	TC("visual-block-delete-comment", "0lll\x16jlllld:write\r",
-	   "/* comment1 */\n/* comment2 */\n", "/* nt1 */\n/* nt2 */\n"),
-	/* block visual on col0 '#' and col1 '*' — the characters rendered by
-	 * the C colorizer as PREPROC/COMMENT must be selectable and deletable */
-	TC("visual-block-delete-hash", "0\x16" "2jd:write\r",
-	   "#define FOO\n#define BAR\n#define BAZ\n",
-	   "define FOO\ndefine BAR\ndefine BAZ\n"),
-	/* five consecutive '#include' lines as in vi-example.c lines 7-11 */
-	TC("visual-block-delete-5includes", "0\x16" "4jd:write\r",
-	   "#include \"vi.h\"\n#include <locale.h>\n#include <regex.h>\n#include <wchar.h>\n#include <wctype.h>\n",
-	   "include \"vi.h\"\ninclude <locale.h>\ninclude <regex.h>\ninclude <wchar.h>\ninclude <wctype.h>\n"),
-	TC("visual-block-delete-star", "0l\x16" "2jd:write\r",
-	   "/*\n * foo\n * bar\n",
-	   "/\n  foo\n  bar\n"),
-	/* six-line block comment as in vi-example.c lines 1-6; select '*' col 1 */
-	TC("visual-block-delete-comment-star-6lines", "0l\x16" "5jd:write\r",
-	   "/*\n * line1\n * line2\n *\n * line4\n */\n",
-	   "/\n  line1\n  line2\n \n  line4\n /\n"),
-	/* dMj / dMk where M exceeds available lines — clamp to buffer boundary */
-	TC("d-j-clamp-at-eof",  "0d100j:write\r", "aaa\nbbb\nccc\n", "\n"),
-	TC("d-j-clamp-partial", "jd100j:write\r", "aaa\nbbb\nccc\n", "aaa\n"),
-	TC("d-k-clamp-at-bof",  "Gd100k:write\r", "aaa\nbbb\nccc\n", "\n"),
-	TC("d-k-clamp-partial", "Gkd100k:write\r", "aaa\nbbb\nccc\n", "ccc\n"),
-	TC("visual-block-yank",      "0lll\x16jlllly:write\r", "abcdefghij\nklmnopqrst\n", "abcdefghij\nklmnopqrst\n"),
-	/* block visual I — insert at col_left on every row in the block */
-	TC("visual-block-insert",    "0lll\x16jIXX\x1b:write\r",
-	   "abcdefghij\nklmnopqrst\n", "abcXXdefghij\nklmXXnopqrst\n"),
-	/* block visual I — row shorter than col_left is skipped */
-	TC("visual-block-insert-short", "0lll\x16" "2jIXX\x1b:write\r",
-	   "abcdefg\nkl\npqrstuv\n", "abcXXdefg\nkl\npqrXXstuv\n"),
-	/* visual cut (C) — cut to default register, paste elsewhere */
-	TC("visual-cut-char",        "vllCj$p:write\r",    "abcde\nXXX\n", "de\nXXXabc\n"),
-	TC("visual-cut-line",        "VCp:write\r",        "one\ntwo\nthree\n", "two\none\nthree\n"),
-	/* visual +C — cut to shared register, paste elsewhere */
-	TC("visual-cut-shared",      "viw+Cj$+p:write\r",  "abc\ndef\n", "\ndefabc\n"),
-	/* :r! */
-	TC("read-shell",      ":r!echo hello\r:write\r",       "first\nlast\n", "first\nhello\nlast\n"),
-	TC("read-shell-addr", ":1r!echo inserted\r:write\r",   "aaa\nbbb\n",    "aaa\ninserted\nbbb\n"),
+    /* * # g* g# word search */
+    TC("star", "*x:write\r", "foo one\nfoo two\nfoo three\n", "foo one\noo two\nfoo three\n"),
+    TC("hash", "jj#x:write\r", "foo one\nfoo two\nfoo three\n", "foo one\noo two\nfoo three\n"),
+    TC("gstar", "g*x:write\r", "foo\nzfooz\nfoo\n", "foo\nzooz\nfoo\n"),
+    TC("ghash", "G0g#x:write\r", "foo\nzfooz\nfoo\n", "foo\nzooz\nfoo\n"),
+    /* j/k and arrow keys preserve column; CR/- go to first non-blank */
+    TC("j-keep-col", "jiX\x1b:write\r", "top\n    mid\nbottom\n", "top\nX    mid\nbottom\n"),
+    TC("k-keep-col", "GkiX\x1b:write\r", "top\n    mid\nbottom\n", "top\nX    mid\nbottom\n"),
+    TC("down-keep-col", "\x1b[BiX\x1b:write\r", "top\n    mid\nbottom\n", "top\nX    mid\nbottom\n"),
+    TC("up-keep-col", "G\x1b[AiX\x1b:write\r", "top\n    mid\nbottom\n", "top\nX    mid\nbottom\n"),
+    /* sticky column survives j through a short line — cursor was at col 3,
+     * the middle row "kl" only reaches col 1, but the second j must still
+     * land at col 3 on the third row, not at col 1 */
+    TC("j-sticky-col-through-short", "0llljjiX\x1b:write\r",
+       "abcde\nkl\npqrst\n", "abcde\nkl\npqrXst\n"),
+    TC("k-sticky-col-through-short", "GlllkkiX\x1b:write\r",
+       "pqrst\nkl\nabcde\n", "pqrXst\nkl\nabcde\n"),
+    /* visual mode */
+    TC("visual-char-delete", "vld:write\r", "abcde\n", "cde\n"),
+    TC("visual-line-delete", "Vjd:write\r", "one\ntwo\nthree\n", "three\n"),
+    TC("visual-put-replace", "ywj0vllp:write\r", "foo\nbar\n", "foo\nfoo\n"),
+    TC("visual-textobj-vi-paren", "f(lvi(d:write\r", "x (abc) y\n", "x () y\n"),
+    TC("visual-textobj-va-paren", "f(lva(d:write\r", "x (abc) y\n", "x  y\n"),
+    TC("visual-textobj-viw", "wviwd:write\r", "one two three\n", "one  three\n"),
+    TC("visual-textobj-vi-quote", "f\"lvi\"d:write\r", "x \"abc\" y\n", "x \"\" y\n"),
+    TC("visual-textobj-vit", "f>lvitd:write\r", "<p>hello</p>\n", "<p></p>\n"),
+    /* count-prefixed motion */
+    TC("count-motion-3j", "3jx:write\r", "one\ntwo\nthree\nfour\nfive\n", "one\ntwo\nthree\nour\nfive\n"),
+    /* operator + motion */
+    TC("operator-dw", "dw:write\r", "foo bar\n", "bar\n"),
+    TC("operator-d2w", "d2w:write\r", "foo bar baz\n", "baz\n"),
+    TC("operator-dd", "dd:write\r", "one\ntwo\nthree\n", "two\nthree\n"),
+    TC("operator-yyp", "yyp:write\r", "foo\nbar\n", "foo\nfoo\nbar\n"),
+    TC("operator-cc", "ccnew\x1b:write\r", "foo\nbar\n", "new\nbar\n"),
+    /* named registers */
+    TC("register-yank-put", "\"ayyj\"ap:write\r", "foo\nbar\n", "foo\nbar\nfoo\n"),
+    /* shift */
+    TC("shift-right", ">>:write\r", "foo\n", "\tfoo\n"),
+    TC("shift-left", "<<:write\r", "\tfoo\n", "foo\n"),
+    TC("shift-right-motion", ">3j:write\r", "a\nb\nc\nd\ne\n", "\ta\n\tb\n\tc\n\td\ne\n"),
+    TC("shift-left-motion", "<2j:write\r", "\ta\n\tb\n\tc\nd\n", "a\nb\nc\nd\n"),
+    TC("shift-right-visual", "Vjj>:write\r", "a\nb\nc\nd\n", "\ta\n\tb\n\tc\nd\n"),
+    TC("shift-left-visual", "Vjj<:write\r", "\ta\n\tb\n\tc\nd\n", "a\nb\nc\nd\n"),
+    /* ZZ write-and-quit */
+    TC("zz-write-quit", "xZZ", "hello\n", "ello\n"),
+    /* dot repeat */
+    TC("dot-repeat-dw", "dw.:write\r", "foo bar baz\n", "baz\n"),
+    TC("dot-repeat-dd", "dd.:write\r", "one\ntwo\nthree\n", "three\n"),
+    TC("dot-repeat-shift", ">>.:write\r", "foo\n", "\t\tfoo\n"),
+    TC("dot-repeat-replace-char", "r,l.:write\r", "abcde\n", ",,cde\n"),
+    TC("dot-repeat-cc", "ccnew\x1bj.:write\r", "old\ntext\n", "new\nnew\n"),
+    TC("dot-repeat-ciw", "wciwnew\x1b"
+                         "0.:write\r",
+       "foo bar\n", "new new\n"),
+    /* undo / redo */
+    TC("undo-x", "xu:write\r", "hello\n", "hello\n"),
+    TC("undo-dd", "ddu:write\r", "one\ntwo\n", "one\ntwo\n"),
+    TC("redo-x", "xu\x12:write\r", "hello\n", "ello\n"),
+    /* search — ERE quantifier: ? matches zero or one */
+    TC("search-ere-optional", "/ab?c\rx:write\r", "ab\nabc\n", "ab\nbc\n"),
+    /* search — ERE quantifier: + matches one or more */
+    TC("search-ere-plus", "/go+\rx:write\r", "g\ngo\ngoo\n", "g\no\ngoo\n"),
+    TC("search-forward", "/bar\rx:write\r", "foo\nbar\nbaz\n", "foo\nar\nbaz\n"),
+    TC("search-backward", "G?foo\rx:write\r", "foo\nbar\nfoo\n", "oo\nbar\nfoo\n"),
+    TC("search-n-repeat", "/bar\rnx:write\r", "foo\nbar\nbaz\nbar\n", "foo\nbar\nbaz\nar\n"),
+    /* marks */
+    TC("mark-set-jump", "mamajj'ax:write\r", "one\ntwo\nthree\n", "ne\ntwo\nthree\n"),
+    TC("colon-mark", ":mark a\rjj'ax:write\r", "one\ntwo\nthree\n", "ne\ntwo\nthree\n"),
+    TC("colon-mark-addr", ":2mark b\r'bx:write\r", "one\ntwo\nthree\n", "one\nwo\nthree\n"),
+    /* replace mode */
+    TC("replace-mode", "RXY\x1b:write\r", "abcde\n", "XYcde\n"),
+    /* clipboard register */
+    TC("visual-shared-yank-put", "viw+yj$+p:write\r", "abc\ndef\n", "abc\ndefabc\n"),
+    /* block visual — column-preserving j/k (the \x16 is Ctrl-V) */
+    /* anchor=col3, 4 right moves → cols 3-7 deleted on each row */
+    TC("visual-block-delete", "0lll\x16jlllld:write\r", "abcdefghij\nklmnopqrst\n", "abcij\nklmst\n"),
+    TC("visual-block-delete-comment", "0lll\x16jlllld:write\r",
+       "/* comment1 */\n/* comment2 */\n", "/* nt1 */\n/* nt2 */\n"),
+    /* block visual on col0 '#' and col1 '*' — the characters rendered by
+     * the C colorizer as PREPROC/COMMENT must be selectable and deletable */
+    TC("visual-block-delete-hash", "0\x16"
+                                   "2jd:write\r",
+       "#define FOO\n#define BAR\n#define BAZ\n",
+       "define FOO\ndefine BAR\ndefine BAZ\n"),
+    /* five consecutive '#include' lines as in vi-example.c lines 7-11 */
+    TC("visual-block-delete-5includes", "0\x16"
+                                        "4jd:write\r",
+       "#include \"vi.h\"\n#include <locale.h>\n#include <regex.h>\n#include <wchar.h>\n#include <wctype.h>\n",
+       "include \"vi.h\"\ninclude <locale.h>\ninclude <regex.h>\ninclude <wchar.h>\ninclude <wctype.h>\n"),
+    TC("visual-block-delete-star", "0l\x16"
+                                   "2jd:write\r",
+       "/*\n * foo\n * bar\n",
+       "/\n  foo\n  bar\n"),
+    /* six-line block comment as in vi-example.c lines 1-6; select '*' col 1 */
+    TC("visual-block-delete-comment-star-6lines", "0l\x16"
+                                                  "5jd:write\r",
+       "/*\n * line1\n * line2\n *\n * line4\n */\n",
+       "/\n  line1\n  line2\n \n  line4\n /\n"),
+    /* dMj / dMk where M exceeds available lines — clamp to buffer boundary */
+    TC("d-j-clamp-at-eof", "0d100j:write\r", "aaa\nbbb\nccc\n", "\n"),
+    TC("d-j-clamp-partial", "jd100j:write\r", "aaa\nbbb\nccc\n", "aaa\n"),
+    TC("d-k-clamp-at-bof", "Gd100k:write\r", "aaa\nbbb\nccc\n", "\n"),
+    TC("d-k-clamp-partial", "Gkd100k:write\r", "aaa\nbbb\nccc\n", "ccc\n"),
+    TC("visual-block-yank", "0lll\x16jlllly:write\r", "abcdefghij\nklmnopqrst\n", "abcdefghij\nklmnopqrst\n"),
+    /* block visual I — insert at col_left on every row in the block */
+    TC("visual-block-insert", "0lll\x16jIXX\x1b:write\r",
+       "abcdefghij\nklmnopqrst\n", "abcXXdefghij\nklmXXnopqrst\n"),
+    /* block visual I — row shorter than col_left is skipped */
+    TC("visual-block-insert-short", "0lll\x16"
+                                    "2jIXX\x1b:write\r",
+       "abcdefg\nkl\npqrstuv\n", "abcXXdefg\nkl\npqrXXstuv\n"),
+    /* visual cut (C) — cut to default register, paste elsewhere */
+    TC("visual-cut-char", "vllCj$p:write\r", "abcde\nXXX\n", "de\nXXXabc\n"),
+    TC("visual-cut-line", "VCp:write\r", "one\ntwo\nthree\n", "two\none\nthree\n"),
+    /* visual +C — cut to shared register, paste elsewhere */
+    TC("visual-cut-shared", "viw+Cj$+p:write\r", "abc\ndef\n", "\ndefabc\n"),
+    /* :r! */
+    TC("read-shell", ":r!echo hello\r:write\r", "first\nlast\n", "first\nhello\nlast\n"),
+    TC("read-shell-addr", ":1r!echo inserted\r:write\r", "aaa\nbbb\n", "aaa\ninserted\nbbb\n"),
 };
 
 /* ------------------------------------------------------------------ */
@@ -1002,7 +1017,7 @@ main(int argc, char *argv[])
 {
 	const char *vi_path = "./vic";
 	const char *tmp_dir = "/tmp";
-	const char *filter  = NULL;
+	const char *filter = NULL;
 	size_t i, n;
 	int all_ok = 1;
 
@@ -1025,10 +1040,10 @@ main(int argc, char *argv[])
 		if (!matches_filter(cases[i].name, filter))
 			continue;
 		all_ok = run_file_case(
-		    cases[i].name, vi_path, tmp_dir,
-		    cases[i].keys, cases[i].keys_len,
-		    cases[i].sample, cases[i].expected
-		) && all_ok;
+		             cases[i].name, vi_path, tmp_dir,
+		             cases[i].keys, cases[i].keys_len,
+		             cases[i].sample, cases[i].expected) &&
+		         all_ok;
 	}
 
 	if (matches_filter("insert-live-redraw", filter))

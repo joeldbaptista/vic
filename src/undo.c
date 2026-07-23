@@ -19,8 +19,34 @@
 #include "undo.h"
 
 #include "buffer.h"
+#include "gap.h"
 #include "screen.h"
 #include "status.h"
+
+static void
+gap_flush_all(struct editor *g)
+{
+	/*
+	 * == Flush gap + restore all live physical pointers ==
+	 *
+	 * Saves dot, screenbegin, and all marks as logical positions, calls
+	 * gap_flush (which moves after-gap content, invalidating physical
+	 * pointers), then restores them as physical pointers in the now-flat
+	 * buffer.  Called before each undo/redo entry so that the entry's
+	 * `start` offset can be used as a flat physical offset.
+	 */
+	int ldot = logical_pos(g, g->dot);
+	int lsb = logical_pos(g, g->screenbegin);
+	int lmarks[30], mi;
+	for (mi = 0; mi < 30; mi++)
+		lmarks[mi] = g->mark[mi] ? logical_pos(g, g->mark[mi]) : -1;
+	gap_flush(g);
+	g->dot = phys_ptr(g, ldot);
+	g->screenbegin = phys_ptr(g, lsb);
+	for (mi = 0; mi < 30; mi++)
+		if (lmarks[mi] >= 0)
+			g->mark[mi] = phys_ptr(g, lmarks[mi]);
+}
 
 static void
 push_undo_entry(struct undo_object **stack_tail,
@@ -107,7 +133,7 @@ undo_push(struct editor *g, char *src, unsigned length, int u_type)
 			g->undo_queue_state = UNDO_DEL;
 			/* fall through */
 		case UNDO_DEL:
-			g->undo_queue_spos = src;
+			g->undo_queue_spos = logical_pos(g, src);
 			g->undo_q++;
 			g->undo_queue[UNDO_QUEUE_MAX - g->undo_q] = *src;
 			if (g->undo_q == UNDO_QUEUE_MAX)
@@ -125,7 +151,7 @@ undo_push(struct editor *g, char *src, unsigned length, int u_type)
 		switch (g->undo_queue_state) {
 		case UNDO_EMPTY:
 			g->undo_queue_state = UNDO_INS;
-			g->undo_queue_spos = src;
+			g->undo_queue_spos = logical_pos(g, src);
 			/* fall through */
 		case UNDO_INS:
 			while (length--) {
@@ -154,7 +180,7 @@ undo_push(struct editor *g, char *src, unsigned length, int u_type)
 		undo_entry = xzalloc(offsetof(struct undo_object, undo_text) + length);
 		memcpy(undo_entry->undo_text, src, length);
 	} else if (u_type == UNDO_DEL || u_type == UNDO_DEL_CHAIN) {
-		if ((g->text + length) == g->end)
+		if ((int)length >= buf_content_size(g))
 			length--;
 		undo_entry = xzalloc(offsetof(struct undo_object, undo_text) + length);
 		memcpy(undo_entry->undo_text, src, length);
@@ -163,9 +189,9 @@ undo_push(struct editor *g, char *src, unsigned length, int u_type)
 	}
 	undo_entry->length = length;
 	if (use_spos)
-		undo_entry->start = g->undo_queue_spos - g->text;
+		undo_entry->start = g->undo_queue_spos; /* already logical */
 	else
-		undo_entry->start = src - g->text;
+		undo_entry->start = logical_pos(g, src);
 	undo_entry->u_type = u_type;
 
 	push_undo_entry(&g->undo_stack_tail, undo_entry);
@@ -255,6 +281,9 @@ apply_undo_stack(struct editor *g, struct undo_object **from_stack,
 	}
 
 	for (;;) {
+		/* Flush gap before each entry so entry->start is a flat offset. */
+		gap_flush_all(g);
+
 		undo_entry = *from_stack;
 		if (!undo_entry)
 			break;
@@ -263,6 +292,7 @@ apply_undo_stack(struct editor *g, struct undo_object **from_stack,
 		switch (undo_entry->u_type) {
 		case UNDO_DEL:
 		case UNDO_DEL_CHAIN:
+			/* After gap_flush, g->text + start == phys_ptr(start). */
 			u_start = g->text + undo_entry->start;
 			text_hole_make(g, u_start, undo_entry->length);
 			memcpy(u_start, undo_entry->undo_text, (size_t)undo_entry->length);
@@ -275,10 +305,12 @@ apply_undo_stack(struct editor *g, struct undo_object **from_stack,
 			            undo_entry->start);
 
 			chain = (undo_entry->u_type == UNDO_DEL_CHAIN);
+			if (!chain)
+				g->dot = u_start;
 			break;
 		case UNDO_INS:
 		case UNDO_INS_CHAIN:
-			u_start = undo_entry->start + g->text;
+			u_start = g->text + undo_entry->start;
 			u_end = u_start - 1 + undo_entry->length;
 			inverse = new_undo_entry(
 			    undo_entry->u_type == UNDO_INS_CHAIN ? UNDO_DEL_CHAIN : UNDO_DEL,
@@ -290,14 +322,14 @@ apply_undo_stack(struct editor *g, struct undo_object **from_stack,
 			            undo_entry->start);
 
 			chain = (undo_entry->u_type == UNDO_INS_CHAIN);
+			/* gap_end is the first content byte after the deletion point. */
+			if (!chain)
+				g->dot = g->gap_end;
 			break;
 		case UNDO_SWAP:
 			u_start = g->text + undo_entry->start;
-			/* Create inverse entry by saving the current (possibly converted)
-			 * bytes before overwriting them. */
 			inverse = new_undo_entry(UNDO_SWAP, undo_entry->start, undo_entry->length,
 			                         u_start);
-			/* Restore original bytes — pure memcpy, no memmove. */
 			memcpy(u_start, undo_entry->undo_text, (size_t)undo_entry->length);
 
 			status_line(g, "%s [%d] %s %d chars at position %d", op_label,
@@ -305,14 +337,12 @@ apply_undo_stack(struct editor *g, struct undo_object **from_stack,
 			            undo_entry->start);
 
 			chain = 0;
+			g->dot = u_start;
 			break;
 		default:
 			chain = 0;
 			break;
 		}
-
-		if (!chain)
-			g->dot = g->text + undo_entry->start;
 
 		*from_stack = undo_entry->prev;
 		free(undo_entry);
@@ -326,6 +356,8 @@ apply_undo_stack(struct editor *g, struct undo_object **from_stack,
 			g->modified_count++;
 
 		if (!chain) {
+			/* Flush again so refresh sees consistent physical pointers. */
+			gap_flush_all(g);
 			refresh(g, FALSE);
 			break;
 		}
@@ -455,18 +487,18 @@ static uint32_t
 buf_checksum(const struct editor *g)
 {
 	/*
-	 * == Additive byte checksum over the entire in-memory buffer ==
+	 * == Additive byte checksum over content bytes, skipping the gap ==
 	 *
-	 * Used to verify that the saved undo sidecar still matches the file on
-	 * disk when loading.  A mismatch means the file was edited externally
-	 * and the undo history is no longer valid.
+	 * Sums the two content segments ([text, gap_start) and [gap_end, end))
+	 * so the checksum matches the on-disk bytes regardless of gap position.
 	 */
 	uint32_t s = 0;
-	const unsigned char *p = (const unsigned char *)g->text;
-	const unsigned char *e = (const unsigned char *)g->end;
+	const unsigned char *p;
 
-	while (p < e)
-		s += *p++;
+	for (p = (const unsigned char *)g->text; p < (const unsigned char *)g->gap_start; p++)
+		s += *p;
+	for (p = (const unsigned char *)g->gap_end; p < (const unsigned char *)g->end; p++)
+		s += *p;
 	return s;
 }
 

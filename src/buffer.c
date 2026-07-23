@@ -1,71 +1,208 @@
 /*
  * buffer.c - gap-buffer mutation and file I/O.
  *
- * Owns the raw text store: text_hole_make opens a gap of <size> bytes at
- * position p (adjusting all live pointers via the returned bias), and
- * text_hole_delete closes a range.  char_insert is the single-character
- * insert path used by insert/replace mode; it handles tab expansion,
- * auto-indent, backspace, showmatch, and undo queuing.  string_insert and
- * file_insert are bulk variants.
+ * The text store is a classic gap buffer:
+ *
+ *   [text .. gap_start)[gap_start .. gap_end)[gap_end .. text+text_size)
+ *    ^^^pre-gap content   ^^^zero-filled gap    ^^^post-gap content
+ *
+ * g->end is always text + text_size (physical allocation end = logical
+ * content end, since the after-gap content runs to the end of the slab).
+ *
+ * Insertion at gap_start is O(1); insertion elsewhere requires one O(n)
+ * memmove to relocate the gap, then O(1) fill.  Sequential edits (typing)
+ * keep the gap at the cursor, so they stay O(1).
  *
  */
 #include "buffer.h"
 
 #include "codepoint.h"
+#include "gap.h"
 #include "input.h"
 #include "line.h"
 #include "status.h"
 #include "undo.h"
 
+/* ---------------------------------------------------------------------------
+ * Internal gap primitives
+ * --------------------------------------------------------------------------- */
+
+/*
+ * gap_move_to — relocate the gap so that gap_start == p.
+ *
+ * p must be a valid content pointer (< gap_start or >= gap_end).
+ * After the call all other content pointers remain valid.
+ */
+static void
+gap_move_to(struct editor *g, char *p)
+{
+	int shift;
+	int gap_size = (int)(g->gap_end - g->gap_start);
+
+	if (p == g->gap_start)
+		return;
+
+	if (p < g->gap_start) {
+		/*
+		 * Move gap left: slide [p, gap_start) into the gap's right end.
+		 * The gap keeps its size; only its position changes, so the
+		 * zeroed span must be exactly gap_size, not `shift'.  When the
+		 * move distance exceeds the gap size (e.g. editing near the
+		 * start of a large file whose gap still sits at the tail),
+		 * zeroing `shift' bytes instead would stomp on the real
+		 * content that the memmove just relocated into the tail of
+		 * that same range.
+		 */
+		shift = (int)(g->gap_start - p);
+		memmove(g->gap_end - shift, p, (size_t)shift);
+		memset(p, 0, (size_t)gap_size);
+		g->gap_end -= shift;
+		g->gap_start = p;
+	} else {
+		/* p >= gap_end: move gap right; slide [gap_end, p) into the
+		 * gap's left end.  Same fixed-size zeroing rationale as above. */
+		shift = (int)(p - g->gap_end);
+		memmove(g->gap_start, g->gap_end, (size_t)shift);
+		memset(p - gap_size, 0, (size_t)gap_size);
+		g->gap_start += shift;
+		g->gap_end = p;
+	}
+}
+
+/*
+ * gap_grow — grow the allocation so the gap has room for at least `needed'
+ * additional bytes.  Adjusts all interior pointers (dot, screenbegin, marks,
+ * gap boundaries, and the caller's *pp) for both the realloc base change and
+ * the post-gap content relocation.  Returns the realloc bias.
+ */
+static uintptr_t
+gap_grow(struct editor *g, char **pp, int needed)
+{
+	char *new_text;
+	int new_size;
+	int after_size;
+	int delta;
+	uintptr_t bias;
+	int i;
+
+	after_size = (int)(g->text + g->text_size - g->gap_end);
+
+	new_size = g->text_size;
+	if (new_size == 0)
+		new_size = 4096;
+	while (new_size - buf_content_size(g) < needed) {
+		if (new_size < 1024 * 1024)
+			new_size *= 2;
+		else
+			new_size += 1024 * 1024;
+	}
+
+	new_text = xrealloc(g->text, (size_t)new_size);
+	bias = (uintptr_t)(new_text - g->text);
+	delta = new_size - g->text_size;
+
+	/* Bias-adjust all interior pointers. */
+	g->dot += bias;
+	g->screenbegin += bias;
+	if (g->visual_anchor)
+		g->visual_anchor += bias;
+	if (g->rstart)
+		g->rstart += bias;
+	/* undo_queue_spos is now a logical int, no adjustment needed */
+	g->gap_start += bias;
+	g->gap_end += bias;
+	for (i = 0; i < (int)ARRAY_SIZE(g->mark); i++)
+		if (g->mark[i])
+			g->mark[i] += bias;
+	*pp += bias;
+	g->text = new_text;
+
+	/* Post-gap pointers also shift by delta (content moves to end). */
+	if (g->dot >= g->gap_end)
+		g->dot += delta;
+	if (g->screenbegin >= g->gap_end)
+		g->screenbegin += delta;
+	if (g->visual_anchor && g->visual_anchor >= g->gap_end)
+		g->visual_anchor += delta;
+	if (g->rstart && g->rstart >= g->gap_end)
+		g->rstart += delta;
+	/* undo_queue_spos is now a logical int, no adjustment needed */
+	for (i = 0; i < (int)ARRAY_SIZE(g->mark); i++)
+		if (g->mark[i] && g->mark[i] >= g->gap_end)
+			g->mark[i] += delta;
+	if (*pp >= g->gap_end)
+		*pp += delta;
+
+	/* Move after-gap content to the end of the new (larger) allocation. */
+	char *new_gap_end = g->text + new_size - after_size;
+	memmove(new_gap_end, g->gap_end, (size_t)after_size);
+	memset(g->gap_end, 0, (size_t)(new_gap_end - g->gap_end));
+
+	g->gap_end = new_gap_end;
+	g->text_size = new_size;
+	g->end = g->text + new_size;
+
+	return bias;
+}
+
+/* ---------------------------------------------------------------------------
+ * Public gap-buffer API
+ * --------------------------------------------------------------------------- */
+
+/*
+ * gap_flush — move the gap to the end of content, making the buffer
+ * temporarily contiguous.  Called before operations that require a flat
+ * byte array (regex search, case-change UNDO_SWAP).
+ */
+void
+gap_flush(struct editor *g)
+{
+	int after_size = (int)(g->end - g->gap_end);
+
+	if (after_size > 0) {
+		memmove(g->gap_start, g->gap_end, (size_t)after_size);
+		memset(g->gap_start + after_size, 0,
+		       (size_t)(g->gap_end - g->gap_start));
+	}
+	g->gap_start += after_size;
+	g->gap_end = g->end;
+}
+
 uintptr_t
 text_hole_make(struct editor *g, char *p, int size)
 {
 	/*
-	 * == Open a gap of `size` bytes at position p ==
+	 * == Open a gap of `size' bytes at position p ==
 	 *
-	 * Grows the backing allocation if needed (doubling up to 1 MB, then
-	 * 1 MB steps), adjusts all interior pointers (dot, screenbegin, end,
-	 * marks) by the realloc bias, and memmoves existing content to make
-	 * room.
+	 * Grows the backing allocation if the gap is too small, then moves
+	 * the gap to p and consumes `size' bytes from it.  After the call,
+	 * p points to the first of the newly reserved bytes (which are zero).
+	 * Callers fill those bytes and must not advance gap_start themselves.
 	 *
-	 * - Returns the bias (new_text - old_text); callers that hold a
-	 *   pointer into the old allocation must add this value to it.
-	 * - All callers that insert text follow this with a memcpy/assignment
-	 *   into the freshly opened bytes.
+	 * Returns the realloc bias; callers that hold a pointer into the old
+	 * allocation must add this value to it.
 	 */
-	char *new_text;
-	int i;
 	uintptr_t bias = 0;
 
 	if (size <= 0)
 		return bias;
 
-	g->end += size;
-	if (g->end >= (g->text + g->text_size)) {
-		/* Double capacity up to 1 MB, then grow by 1 MB steps.
-		 * This amortises reallocs during scripted bulk inserts while
-		 * keeping overshoot bounded for large files. */
-		int needed = (int)(g->end - g->text);
-		if (g->text_size == 0)
-			g->text_size = 4096;
-		while (g->text_size < needed) {
-			if (g->text_size < 1024 * 1024)
-				g->text_size *= 2;
-			else
-				g->text_size += 1024 * 1024;
-		}
-		new_text = xrealloc(g->text, g->text_size);
-		bias = (uintptr_t)(new_text - g->text);
-		g->screenbegin += bias;
-		g->dot += bias;
-		g->end += bias;
-		p += bias;
-		for (i = 0; i < (int)ARRAY_SIZE(g->mark); i++)
-			if (g->mark[i])
-				g->mark[i] += bias;
-		g->text = new_text;
-	}
-	memmove(p + size, p, g->end - size - p);
+	if ((int)(g->gap_end - g->gap_start) < size)
+		bias = gap_grow(g, &p, size);
+
+	gap_move_to(g, p);
+
+	/*
+	 * gap_move_to sets gap_start == p only when the gap moved left (or
+	 * was already there).  When it moved right to reach p, the reserved
+	 * bytes land at gap_start instead, which is (gap size) behind p.
+	 * Fold that shift into the returned bias so p + bias always points
+	 * at the newly reserved region.
+	 */
+	bias += (uintptr_t)(g->gap_start - p);
+
+	/* Consume `size' bytes from the gap (they become pre-gap content). */
+	g->gap_start += size;
 
 	return bias;
 }
@@ -74,60 +211,62 @@ char *
 text_hole_delete(struct editor *g, char *p, char *q, int undo)
 {
 	/*
-	 * == Delete the byte range [p, q] (inclusive) from the buffer ==
+	 * == Delete the content range [p, q] (inclusive) from the buffer ==
 	 *
-	 * Pushes an undo record according to the `undo` flag before removing
-	 * content, then memmoves subsequent bytes down to close the gap.
-	 * Handles reversed p/q automatically.
-	 *
-	 * - Returns the new position of what was p after the deletion.
-	 * - Callers that hold other pointers into the buffer must re-derive
-	 *   them after this call (no bias return; the allocation does not
-	 *   change size, only content shifts).
+	 * Moves the gap to p, saves the bytes for undo, then extends the gap
+	 * over the deleted content.  Returns the first content byte after the
+	 * deletion point (= new gap_end), clamped to a valid content position.
 	 */
-	char *src;
-	char *dest;
-	int cnt;
-	int hole_size;
+	int lp, lq, hole_size;
+	char *result;
 
-	src = q + 1;
-	dest = p;
-	if (q < p) {
-		src = p + 1;
-		dest = q;
+	/* Normalise to logical offsets so gap movement doesn't invalidate q. */
+	lp = logical_pos(g, p);
+	lq = logical_pos(g, q);
+	if (lq < lp) {
+		int tmp = lp;
+		lp = lq;
+		lq = tmp;
 	}
-	hole_size = q - p + 1;
-	cnt = g->end - src;
+	hole_size = lq - lp + 1;
+
+	/* Move gap to deletion start so the bytes to delete are contiguous at
+	 * gap_end, making the undo copy straightforward. */
+	gap_move_to(g, phys_ptr(g, lp));
+	/* bytes to delete: [gap_end, gap_end + hole_size) */
+
+	g->modified_count--;
+	if (g->gap_end >= g->end || hole_size <= 0)
+		goto thd0;
+	if (hole_size > (int)(g->end - g->gap_end))
+		hole_size = (int)(g->end - g->gap_end);
+	g->modified_count++;
+
 	switch (undo) {
 	case NO_UNDO:
 		break;
 	case ALLOW_UNDO:
-		undo_push(g, p, (unsigned)hole_size, UNDO_DEL);
+		undo_push(g, g->gap_end, (unsigned)hole_size, UNDO_DEL);
 		break;
 	case ALLOW_UNDO_CHAIN:
-		undo_push(g, p, (unsigned)hole_size, UNDO_DEL_CHAIN);
+		undo_push(g, g->gap_end, (unsigned)hole_size, UNDO_DEL_CHAIN);
 		break;
 	case ALLOW_UNDO_QUEUED:
-		undo_push(g, p, (unsigned)hole_size, UNDO_DEL_QUEUED);
+		undo_push(g, g->gap_end, (unsigned)hole_size, UNDO_DEL_QUEUED);
 		break;
 	}
-	g->modified_count--;
-	if (src < g->text || src > g->end)
-		goto thd0;
-	if (dest < g->text || dest >= g->end)
-		goto thd0;
-	g->modified_count++;
-	if (src >= g->end)
-		goto thd_atend;
-	memmove(dest, src, (size_t)cnt);
-thd_atend:
-	g->end = g->end - hole_size;
-	if (dest >= g->end)
-		dest = g->end - 1;
-	if (g->end <= g->text)
-		dest = g->end = g->text;
+
+	/* Absorb deleted bytes into gap. */
+	memset(g->gap_end, 0, (size_t)hole_size);
+	g->gap_end += hole_size;
+
 thd0:
-	return dest;
+	result = g->gap_end;
+	if (result >= g->end)
+		result = g->gap_start > g->text ? g->gap_start - 1 : g->text;
+	if (g->end <= g->text)
+		result = g->gap_start = g->gap_end = g->text;
+	return result;
 }
 
 int
@@ -135,13 +274,6 @@ file_insert(struct editor *g, const char *fn, char *p, int initial)
 {
 	/*
 	 * == Read a file into the buffer at position p ==
-	 *
-	 * Opens fn, stats it to get the size, calls text_hole_make to reserve
-	 * space, then reads the file content in.  On the initial load (initial
-	 * = 1) also sets g->readonly_mode when the file is not writable.
-	 *
-	 * - Returns the byte count inserted, or -1 on failure.
-	 * - Errors are reported via status_line_bold and the hole is collapsed.
 	 */
 	int cnt = -1;
 	int fd;
@@ -170,9 +302,13 @@ file_insert(struct editor *g, const char *fn, char *p, int initial)
 	}
 	size = (statbuf.st_size < INT_MAX ? (int)statbuf.st_size : INT_MAX);
 	p += text_hole_make(g, p, size);
+	/* text_hole_make consumed `size' bytes from the gap; p now points at
+	 * the reserved (zero-filled) region in pre-gap content.  Read the
+	 * file directly into it. */
 	cnt = (int)full_read(fd, p, (size_t)size);
 	if (cnt < 0) {
 		status_line_bold_errno(g, fn);
+		/* Reclaim the space: re-absorb via delete. */
 		p = text_hole_delete(g, p, p + size - 1, NO_UNDO);
 	} else if (cnt < size) {
 		p = text_hole_delete(g, p + cnt, p + size - 1, NO_UNDO);
@@ -195,10 +331,6 @@ stupid_insert(struct editor *g, char *p, char c)
 {
 	/*
 	 * == Insert a single byte c at position p ==
-	 *
-	 * Thin wrapper: opens a 1-byte hole via text_hole_make and writes c
-	 * into it.  Returns the realloc bias for callers that need to adjust
-	 * their pointers.  Does not record an undo entry.
 	 */
 	uintptr_t bias;
 
@@ -213,19 +345,6 @@ char_insert(struct editor *g, char *p, char c, int undo)
 {
 	/*
 	 * == Insert one character from INSERT/REPLACE mode ==
-	 *
-	 * Handles all the special cases that arise during interactive typing:
-	 * - Ctrl-V: literal next character (bypasses special handling).
-	 * - ESC:    commits the undo queue, exits insert mode, strips trailing
-	 *           autoindent whitespace from blank lines.
-	 * - Ctrl-D: de-indents one tab stop (used in insert mode).
-	 * - Tab:    expands to spaces when expandtab is set.
-	 * - Backspace/DEL: deletes the preceding character, or (in REPLACE
-	 *   mode) pops the undo stack to restore the overwritten byte.
-	 * - '\n':   commits the undo queue then auto-indents the new line.
-	 * - Other:  inserts the byte, optionally shows a matching bracket.
-	 *
-	 * - Returns the new value of p (after insertion the pointer shifts).
 	 */
 	size_t len;
 	int col;
@@ -246,7 +365,7 @@ char_insert(struct editor *g, char *p, char c, int undo)
 		g->cmdcnt = 0;
 		reset_ydreg(g);
 		g->last_status_cksum = 0;
-		if ((g->dot > g->text) && (p[-1] != '\n'))
+		if ((g->dot > g->text) && (buf_char_before(g, p) != '\n'))
 			p--;
 		if (IS_AUTOINDENT(g)) {
 			len = indent_len(g, bol);
@@ -341,10 +460,6 @@ init_filename(struct editor *g, char *fn)
 {
 	/*
 	 * == Set the current filename for the first time ==
-	 *
-	 * If g->current_filename is NULL, sets it to fn.  Otherwise pushes fn
-	 * into g->alt_filename (the '#' register), discarding the old
-	 * alternate.  Used when opening the very first file.
 	 */
 	char *copy = xstrdup(fn);
 
@@ -361,10 +476,6 @@ update_filename(struct editor *g, char *fn)
 {
 	/*
 	 * == Update the current filename, preserving the previous as alternate ==
-	 *
-	 * When fn differs from g->current_filename, the old name becomes
-	 * g->alt_filename (the '#' register) and fn becomes current.
-	 * No-op when fn is NULL or matches the current name.
 	 */
 	if (fn == NULL)
 		return;
@@ -382,23 +493,23 @@ init_text_buffer(struct editor *g, char *fn)
 	/*
 	 * == Initialise the text buffer for a new file ==
 	 *
-	 * Frees any previous buffer, allocates a fresh 10 KB slab, loads fn
-	 * via file_insert (ensuring the buffer always ends with '\n'), flushes
-	 * undo history, resets the modified count and cache stamps, and clears
-	 * all marks.  Loads the persistent undo sidecar last (undo_load).
-	 *
-	 * - Returns the byte count from file_insert, or <= 0 on a new/empty
-	 *   file.
+	 * Allocates a fresh slab with the gap occupying the whole slab initially.
+	 * file_insert fills content and the gap shrinks accordingly.
 	 */
 	int rc;
 
 	free(g->text);
 	g->text_size = 10240;
-	g->screenbegin = g->dot = g->end = g->text = xzalloc((size_t)g->text_size);
+	g->text = xzalloc((size_t)g->text_size);
+	/* Gap spans the whole allocation; content is empty. */
+	g->gap_start = g->text;
+	g->gap_end = g->text + g->text_size;
+	g->end = g->text + g->text_size;
+	g->screenbegin = g->dot = g->text;
 
 	update_filename(g, fn);
 	rc = file_insert(g, fn, g->text, 1);
-	if (rc <= 0 || *(g->end - 1) != '\n') {
+	if (rc <= 0 || buf_char_before(g, buf_end(g)) != '\n') {
 		char_insert(g, g->end, '\n', NO_UNDO);
 	}
 
@@ -418,11 +529,6 @@ string_insert(struct editor *g, char *p, const char *s, int undo)
 {
 	/*
 	 * == Insert a NUL-terminated string at position p ==
-	 *
-	 * Records one undo entry for the entire string, opens a gap via
-	 * text_hole_make, and memcpys s into it.
-	 *
-	 * - Returns the realloc bias; callers must adjust any stale pointers.
 	 */
 	uintptr_t bias;
 	int i;
@@ -442,16 +548,15 @@ file_write(struct editor *g, char *fn, char *first, char *last)
 	/*
 	 * == Write a buffer range to disk ==
 	 *
-	 * Opens (or creates) fn, writes [first, last] inclusive, truncates
-	 * the file to the written length (handles overwrites of shorter
-	 * content), and saves the undo sidecar on success.
+	 * Writes the content in [first, last] inclusive.  The range may span
+	 * the gap, in which case two write calls are issued.
 	 *
-	 * - Returns byte count written, -2 if fn is NULL, -1 on open error,
-	 *   0 when the write was short (disk full).
+	 * Returns byte count written, -2 if fn is NULL, -1 on open error,
+	 * 0 when the write was short.
 	 */
 	int fd;
 	int cnt;
-	int charcnt;
+	int charcnt = 0;
 
 	if (fn == 0) {
 		status_line_bold(g, "No current filename");
@@ -460,15 +565,39 @@ file_write(struct editor *g, char *fn, char *first, char *last)
 	fd = open(fn, (O_WRONLY | O_CREAT), 0666);
 	if (fd < 0)
 		return -1;
-	cnt = last - first + 1;
-	charcnt = (int)full_write(fd, first, (size_t)cnt);
-	ftruncate(fd, charcnt);
-	if (charcnt != cnt)
-		charcnt = 0;
-	close(fd);
 
+	/* Segment 1: [first, min(last, gap_start-1)] */
+	if (first < g->gap_start) {
+		char *seg_end = (last < g->gap_start) ? last : g->gap_start - 1;
+		cnt = (int)(seg_end - first + 1);
+		if (cnt > 0) {
+			int w = (int)full_write(fd, first, (size_t)cnt);
+			if (w != cnt)
+				goto short_write;
+			charcnt += w;
+		}
+	}
+
+	/* Segment 2: [max(first, gap_end), last] */
+	{
+		char *seg_start = (first >= g->gap_end) ? first : g->gap_end;
+		if (seg_start <= last) {
+			cnt = (int)(last - seg_start + 1);
+			int w = (int)full_write(fd, seg_start, (size_t)cnt);
+			if (w != cnt)
+				goto short_write;
+			charcnt += w;
+		}
+	}
+
+	ftruncate(fd, charcnt);
+	close(fd);
 	if (charcnt > 0)
 		undo_save(g, fn);
-
 	return charcnt;
+
+short_write:
+	ftruncate(fd, charcnt);
+	close(fd);
+	return 0;
 }

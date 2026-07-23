@@ -20,6 +20,8 @@
 #define _GNU_SOURCE
 #include "line.h"
 
+#include "gap.h"
+
 char *
 begin_line(struct editor *g, char *p)
 {
@@ -33,7 +35,7 @@ begin_line(struct editor *g, char *p)
 		p = memrchr(g->text, '\n', p - g->text);
 		if (!p)
 			return g->text;
-		return p + 1;
+		return buf_next(g, p);
 	}
 	return p;
 }
@@ -65,9 +67,11 @@ dollar_line(struct editor *g, char *p)
 	 * On an empty line (content is just '\n') stays at the newline itself
 	 * so the cursor has somewhere to land.
 	 */
+	char *bl;
 	p = end_line(g, p);
-	if (*p == '\n' && (p - begin_line(g, p)) > 0)
-		p--;
+	bl = begin_line(g, p);
+	if (*p == '\n' && logical_pos(g, p) > logical_pos(g, bl))
+		p = buf_prev(g, p);
 	return p;
 }
 
@@ -82,8 +86,8 @@ prev_line(struct editor *g, char *p)
 	 * Returns g->text when already on the first line.
 	 */
 	p = begin_line(g, p);
-	if (p > g->text && p[-1] == '\n')
-		p--;
+	if (p > g->text && buf_char_before(g, p) == '\n')
+		p = buf_prev(g, p);
 	p = begin_line(g, p);
 	return p;
 }
@@ -99,7 +103,7 @@ next_line(struct editor *g, char *p)
 	 */
 	p = end_line(g, p);
 	if (p < g->end - 1 && *p == '\n')
-		p++;
+		p = buf_next(g, p);
 	return p;
 }
 
@@ -147,7 +151,7 @@ count_lines(struct editor *g, char *start, char *stop)
 		start = end_line(g, start);
 		if (*start == '\n')
 			cnt++;
-		start++;
+		start = buf_next(g, start);
 	}
 	return cnt;
 }
@@ -225,7 +229,7 @@ at_eof(struct editor *g, const char *s)
 	 * with a real newline.  Used by motions to avoid moving past the last
 	 * writable position.
 	 */
-	return ((s == g->end - 2 && s[1] == '\n') || s == g->end - 1);
+	return (s == g->end - 1 || buf_next(g, (char *)s) == g->end - 1);
 }
 
 size_t

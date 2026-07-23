@@ -22,6 +22,7 @@
 #include "buffer.h"
 #include "codepoint.h"
 #include "editcmd.h"
+#include "gap.h"
 #include "input.h"
 #include "line.h"
 #include "motion.h"
@@ -187,15 +188,35 @@ text_yank(struct editor *g, char *p, char *q, int dest, int buftype)
 	 * content, and writes through to the yank-file for the shared (+) and
 	 * current ydreg registers.  Returns p (the normalised start pointer).
 	 * Handles reversed p/q by swapping them.
+	 *
+	 * Copies logical content byte-by-byte (via buf_next) rather than a
+	 * raw memcpy, since [p, q] may straddle the gap.
 	 */
 	char *oldreg = g->reg[dest];
-	int cnt = q - p;
+	int lp = logical_pos(g, p);
+	int lq = logical_pos(g, q);
+	int cnt;
+	char *buf;
+	char *src;
+	int i;
 
-	if (cnt < 0) {
+	if (lq < lp) {
+		int tmp = lp;
+		lp = lq;
+		lq = tmp;
 		p = q;
-		cnt = -cnt;
 	}
-	g->reg[dest] = xstrndup(p, cnt + 1);
+	cnt = lq - lp + 1;
+
+	buf = xmalloc((size_t)cnt + 1);
+	src = phys_ptr(g, lp);
+	for (i = 0; i < cnt; i++) {
+		buf[i] = *src;
+		src = buf_next(g, src);
+	}
+	buf[cnt] = '\0';
+
+	g->reg[dest] = buf;
 	g->regtype[dest] = buftype;
 	free(oldreg);
 

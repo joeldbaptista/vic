@@ -16,6 +16,7 @@
 #define _XOPEN_SOURCE 700
 #include "codepoint.h"
 
+#include "gap.h"
 #include "line.h"
 #include "utf8.h"
 
@@ -29,14 +30,20 @@ cp_start(struct editor *g, char *p)
 	 *
 	 * If p lands inside a multi-byte sequence (continuation byte 0x80–0xBF),
 	 * walks backward to the lead byte.  Clamps to [g->text, g->end].
+	 * The gap is always at a codepoint boundary, so we never need to cross it.
 	 */
 	if (p <= g->text)
 		return g->text;
-	if (p >= g->end)
-		return g->end;
+	if (p >= buf_end(g))
+		return buf_end(g);
+	/* Skip over any gap bytes that p might have landed on. */
+	if (p >= g->gap_start && p < g->gap_end)
+		p = g->gap_end;
 	if (((unsigned char)*p & 0xC0) != 0x80)
 		return p;
-	return (char *)stepbwd(p + 1, g->text);
+	/* Walk backward over continuation bytes, staying out of the gap. */
+	char *limit = (p > g->gap_end) ? g->gap_end : g->text;
+	return (char *)stepbwd(p + 1, limit);
 }
 
 char *
@@ -45,23 +52,24 @@ cp_next(struct editor *g, char *p)
 	/*
 	 * == Advance one UTF-8 codepoint ==
 	 *
-	 * Snaps p to its codepoint start, then steps forward via stepfwd.
-	 * Clamps at g->end.
-	 *
-	 * When p is a continuation byte inside an incomplete or invalid sequence,
-	 * cp_start() retreats to the lead byte and stepfwd() may return a position
-	 * at or before the original p.  Guard against that to ensure callers
-	 * always make progress.
+	 * Snaps p to its codepoint start, steps forward within the current
+	 * content segment, then jumps the gap if needed.  Clamps at g->end.
 	 */
 	char *orig = p;
 	char *n;
+	char *seg_end;
 
 	p = cp_start(g, p);
-	if (p >= g->end)
-		return g->end;
-	n = (char *)stepfwd(p, g->end);
+	if (p >= buf_end(g))
+		return buf_end(g);
+	/* Step forward only within the current segment (stop at gap boundary). */
+	seg_end = (p < g->gap_start) ? g->gap_start : buf_end(g);
+	n = (char *)stepfwd(p, seg_end);
 	if (n <= orig)
-		return orig < g->end ? orig + 1 : g->end;
+		n = orig < seg_end ? orig + 1 : seg_end;
+	/* Jump the gap. */
+	if (n == g->gap_start)
+		n = g->gap_end;
 	return n;
 }
 
@@ -71,12 +79,19 @@ cp_prev(struct editor *g, char *p)
 	/*
 	 * == Retreat one UTF-8 codepoint ==
 	 *
-	 * Steps p back to the lead byte of the preceding codepoint via stepbwd.
-	 * Clamps at g->text.
+	 * Steps p back to the lead byte of the preceding codepoint, jumping
+	 * the gap if p is at gap_end.  Clamps at g->text.
 	 */
 	if (p <= g->text)
 		return g->text;
-	return (char *)stepbwd(p, g->text);
+	/* Jump the gap backward. */
+	if (p == g->gap_end)
+		p = g->gap_start;
+	if (p <= g->text)
+		return g->text;
+	/* Walk backward within the current segment. */
+	char *limit = (p > g->gap_end) ? g->gap_end : g->text;
+	return (char *)stepbwd(p, limit);
 }
 
 char *

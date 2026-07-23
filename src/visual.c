@@ -22,6 +22,7 @@
 #include "buffer.h"
 #include "codepoint.h"
 #include "editcmd.h"
+#include "gap.h"
 #include "line.h"
 #include "motion.h"
 #include "operator.h"
@@ -59,14 +60,28 @@ visual_block_insert_replay(struct editor *g)
 	char **rows;
 	int i;
 
-	insert_start = g->text + g->vis_block_insert_start_off;
-	insert_len = (int)(g->dot - insert_start) + 1;
+	insert_start = phys_ptr(g, g->vis_block_insert_start_off);
+	insert_len = logical_pos(g, g->dot) - g->vis_block_insert_start_off + 1;
 	if (insert_len <= 0)
 		return;
 
-	insert_text = xstrndup(insert_start, (size_t)insert_len);
+	{
+		/* Gap-free copy of inserted text (may span the gap). */
+		char *wp = insert_start;
+		char *end_ptr = buf_next(g, g->dot);
+		int j = 0;
+		insert_text = xmalloc((size_t)insert_len + 1);
+		while (wp != end_ptr && j < insert_len) {
+			if (wp == g->gap_start) {
+				wp = g->gap_end;
+				continue;
+			}
+			insert_text[j++] = *wp++;
+		}
+		insert_text[j] = '\0';
+	}
 
-	row_top = g->text + g->vis_block_row_top_off;
+	row_top = phys_ptr(g, g->vis_block_row_top_off);
 	/*
 	 * vis_block_row_bot_off was recorded before the user typed anything.
 	 * All insert_len bytes were inserted on row_top (at insert_start_off),
@@ -74,7 +89,7 @@ visual_block_insert_replay(struct editor *g)
 	 * row_bot one byte forward, so the current begin_line of the bottom
 	 * row is at the saved offset + insert_len.
 	 */
-	row_bot = g->text + g->vis_block_row_bot_off + insert_len;
+	row_bot = phys_ptr(g, g->vis_block_row_bot_off + insert_len);
 	col = g->vis_block_insert_col;
 
 	/* Count rows below row_top in the block. */
@@ -235,10 +250,10 @@ block_visual_cols(struct editor *g, int *col_left, int *col_right,
 	int ca = get_column(g, a);
 	int cb = get_column(g, b);
 
-	*col_left  = ca < cb ? ca : cb;
+	*col_left = ca < cb ? ca : cb;
 	*col_right = ca < cb ? cb : ca;
-	*row_top   = begin_line(g, a < b ? a : b);
-	*row_bot   = begin_line(g, a < b ? b : a);
+	*row_top = begin_line(g, a < b ? a : b);
+	*row_bot = begin_line(g, a < b ? b : a);
 }
 
 struct block_range *
@@ -380,13 +395,20 @@ visual_apply_operator(struct editor *g, int op)
 			char *buf, *dst;
 
 			for (i = 0; i < count; i++)
-				total += (size_t)(ranges[i].q - ranges[i].p) + 1;
+				total += (size_t)(logical_pos(g, ranges[i].q) -
+				                  logical_pos(g, ranges[i].p)) +
+				         1;
 			buf = xmalloc(total + 1);
 			dst = buf;
 			for (i = 0; i < count; i++) {
-				size_t len = (size_t)(ranges[i].q - ranges[i].p);
-				memcpy(dst, ranges[i].p, len);
-				dst += len;
+				char *wp = ranges[i].p;
+				while (wp < ranges[i].q) {
+					if (wp == g->gap_start) {
+						wp = g->gap_end;
+						continue;
+					}
+					*dst++ = *wp++;
+				}
 				*dst++ = '\n';
 			}
 			*dst = '\0';
@@ -401,13 +423,36 @@ visual_apply_operator(struct editor *g, int op)
 		}
 
 		if (op == 'U' || op == 'u') {
-			/* Case-change: in-place, uniform byte count.  Save the full
-			 * contiguous span as one UNDO_SWAP entry so a single 'u'
-			 * restores everything.  Bytes between ranges are over-saved
-			 * but restored to their unchanged values, which is correct. */
-			char *span_start = ranges[0].p;
-			char *span_end = ranges[count - 1].q - 1;
+			/* Case-change: flush the gap so span_start..span_end is
+			 * contiguous, enabling a single UNDO_SWAP entry. */
+			char *span_start, *span_end;
 			char *p;
+			int lranges_p[count], lranges_q[count];
+			int ldot, lscreenbegin;
+			int mi, nmarks2 = (int)(sizeof(g->mark) / sizeof(g->mark[0]));
+			int lmarks2[nmarks2];
+
+			for (i = 0; i < count; i++) {
+				lranges_p[i] = logical_pos(g, ranges[i].p);
+				lranges_q[i] = logical_pos(g, ranges[i].q);
+			}
+			ldot = logical_pos(g, g->dot);
+			lscreenbegin = logical_pos(g, g->screenbegin);
+			for (mi = 0; mi < nmarks2; mi++)
+				lmarks2[mi] = g->mark[mi] ? logical_pos(g, g->mark[mi]) : -1;
+			gap_flush(g);
+			g->dot = phys_ptr(g, ldot);
+			g->screenbegin = phys_ptr(g, lscreenbegin);
+			for (i = 0; i < count; i++) {
+				ranges[i].p = phys_ptr(g, lranges_p[i]);
+				ranges[i].q = phys_ptr(g, lranges_q[i]);
+			}
+			for (mi = 0; mi < nmarks2; mi++)
+				if (lmarks2[mi] >= 0)
+					g->mark[mi] = phys_ptr(g, lmarks2[mi]);
+
+			span_start = ranges[0].p;
+			span_end = ranges[count - 1].q - 1;
 
 			undo_push(g, span_start,
 			          (unsigned)(span_end - span_start + 1), UNDO_SWAP);
@@ -510,10 +555,25 @@ visual_apply_operator(struct editor *g, int op)
 	}
 
 	if (op == 'U' || op == 'u') {
+		/* Flush gap so start..stop is contiguous for UNDO_SWAP. */
+		int lstart = logical_pos(g, start);
+		int lstop = logical_pos(g, stop);
+		int ldot2 = logical_pos(g, g->dot);
+		int lscreenbegin2 = logical_pos(g, g->screenbegin);
+		int mi, nmarks = (int)(sizeof(g->mark) / sizeof(g->mark[0]));
+		int lmarks[nmarks];
 		char *p;
+		for (mi = 0; mi < nmarks; mi++)
+			lmarks[mi] = g->mark[mi] ? logical_pos(g, g->mark[mi]) : -1;
+		gap_flush(g);
+		start = phys_ptr(g, lstart);
+		stop = phys_ptr(g, lstop);
+		g->dot = phys_ptr(g, ldot2);
+		g->screenbegin = phys_ptr(g, lscreenbegin2);
+		for (mi = 0; mi < nmarks; mi++)
+			if (lmarks[mi] >= 0)
+				g->mark[mi] = phys_ptr(g, lmarks[mi]);
 
-		/* Save the exact original bytes as a single swap entry.
-		 * Undo restores them with one memcpy — no memmove, no realloc. */
 		undo_push(g, start, (unsigned)(stop - start + 1), UNDO_SWAP);
 
 		for (p = start; p <= stop; p++) {

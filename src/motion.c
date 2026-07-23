@@ -19,6 +19,7 @@
 #include "motion.h"
 
 #include "codepoint.h"
+#include "gap.h"
 #include "input.h"
 #include "line.h"
 #include "undo.h"
@@ -34,7 +35,7 @@ dot_left(struct editor *g)
 	 */
 	undo_queue_commit(g);
 	g->dot = cp_start(g, g->dot);
-	if (g->dot > g->text && g->dot[-1] != '\n')
+	if (g->dot > g->text && buf_char_before(g, g->dot) != '\n')
 		g->dot = cp_prev(g, g->dot);
 }
 
@@ -363,7 +364,7 @@ motion_run_goto_line_cmd(struct editor *g)
 	 * With a count n: jumps to line n (1-based), landing on the first
 	 * non-blank character.
 	 */
-	g->dot = g->end - 1;
+	g->dot = buf_prev(g, buf_end(g));
 	if (g->cmdcnt > 0)
 		g->dot = find_line(g, g->cmdcnt);
 	dot_begin(g);
@@ -690,6 +691,14 @@ bound_dot(struct editor *g, char *p)
 	 * Ensures p is within [g->text, g->end - 1] and snapped to a codepoint
 	 * start.  Calls indicate_error when clamping was necessary.
 	 * Used at operator-range boundaries to prevent out-of-bounds access.
+	 *
+	 * p == gap_start is a valid, meaningful cursor position in its own
+	 * right (the usual spot right after an insertion) and is always
+	 * already at a codepoint boundary, so it must not be routed through
+	 * cp_start: that would redirect it to gap_end, silently teleporting
+	 * the cursor to a different physical (though same logical) spot and
+	 * breaking the O(1) sequential-insert fast path along with any raw
+	 * pointer arithmetic keyed off dot afterward.
 	 */
 	if (p >= g->end && g->end > g->text) {
 		p = g->end - 1;
@@ -699,7 +708,7 @@ bound_dot(struct editor *g, char *p)
 		p = g->text;
 		indicate_error(g);
 	}
-	if (p > g->text && p < g->end)
+	if (p > g->text && p < g->end && p != g->gap_start)
 		p = cp_start(g, p);
 	return p;
 }

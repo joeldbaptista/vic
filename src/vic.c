@@ -6,6 +6,7 @@
 #include "editcmd.h"
 #include "ex.h"
 #include "excore.h"
+#include "gap.h"
 #include "input.h"
 #include "line.h"
 #include "motion.h"
@@ -821,7 +822,7 @@ run_zz_cmd(struct editor *g, const struct cmd_ctx *ctx)
 		if (cnt < 0) {
 			if (cnt == -1)
 				status_line_bold(g, "Write error: %s", strerror(errno));
-		} else if (cnt == (g->end - 1 - g->text + 1)) {
+		} else if (cnt == buf_content_size(g)) {
 			g->editing = 0;
 		}
 	} else {
@@ -883,7 +884,7 @@ do_put(struct editor *g, int before)
 			cnt = i * strlen(p) - 1;
 	}
 	do {
-		string_insert(g, g->dot, p, allow_undo);
+		g->dot += string_insert(g, g->dot, p, allow_undo);
 		allow_undo = ALLOW_UNDO_CHAIN;
 	} while (--g->cmdcnt > 0);
 	g->dot += cnt;
@@ -1280,9 +1281,9 @@ handle_visual_key(struct editor *g, int c, const struct cmd_ctx *ctx,
 		g->dot = move_to_col(g, row_top, col_left);
 		g->vis_block_insert_active = 1;
 		g->vis_block_insert_col = col_left;
-		g->vis_block_insert_start_off = (int)(g->dot - g->text);
-		g->vis_block_row_top_off = (int)(row_top - g->text);
-		g->vis_block_row_bot_off = (int)(row_bot - g->text);
+		g->vis_block_insert_start_off = logical_pos(g, g->dot);
+		g->vis_block_row_top_off = logical_pos(g, row_top);
+		g->vis_block_row_bot_off = logical_pos(g, row_bot);
 		edit_run_start_insert_cmd(g);
 		return;
 	}
@@ -1366,7 +1367,7 @@ do_cmd(struct editor *g, int c, const struct cmd_ctx *ctx)
 	handle_normal_key(g, c, ctx, &orig_dot);
 
 epilogue:
-	if (g->end == g->text) {
+	if (buf_content_size(g) == 0) {
 		/* buffer became empty — restore the sentinel newline */
 		char_insert(g, g->text, '\n', NO_UNDO);
 		g->dot = g->text;
@@ -1379,7 +1380,7 @@ epilogue:
 
 	if (!isdigit(c))
 		g->cmdcnt = 0;
-	cnt = g->dot - begin_line(g, g->dot);
+	cnt = logical_pos(g, g->dot) - logical_pos(g, begin_line(g, g->dot));
 	/* keep dot off the newline in normal mode */
 	if (*g->dot == '\n' && cnt > 0 && g->cmd_mode == 0)
 		g->dot = cp_prev(g, g->dot);

@@ -29,6 +29,7 @@
  */
 #include "run.h"
 #include "buffer.h"
+#include "gap.h"
 #include "status.h"
 #include "undo.h"
 #include <ctype.h>
@@ -188,11 +189,11 @@ run_trimsel(struct editor *g, int argc, char *argv[],
 
 	/* Use exact visual marks when available. */
 	start = g->mark[MARK_LT] ? g->mark[MARK_LT] : rs;
-	end   = g->mark[MARK_GT] ? g->mark[MARK_GT] : re;
+	end = g->mark[MARK_GT] ? g->mark[MARK_GT] : re;
 	if (start > end) {
 		char *tmp = start;
 		start = end;
-		end   = tmp;
+		end = tmp;
 	}
 
 	if (mode == 0 || mode == 1) {
@@ -213,9 +214,11 @@ run_trimsel(struct editor *g, int argc, char *argv[],
 
 	{
 		char *sel_start = g->mark[MARK_LT] ? g->mark[MARK_LT] : rs;
-		char *sel_end   = g->mark[MARK_GT] ? g->mark[MARK_GT] : re;
+		char *sel_end = g->mark[MARK_GT] ? g->mark[MARK_GT] : re;
 		if (sel_start > sel_end) {
-			char *tmp = sel_start; sel_start = sel_end; sel_end = tmp;
+			char *tmp = sel_start;
+			sel_start = sel_end;
+			sel_end = tmp;
 		}
 		if (start > sel_start || end < sel_end) {
 			int new_len = (int)(end - start + 1);
@@ -1548,14 +1551,33 @@ run_dispatch(struct editor *g, int argc, char *argv[],
 	/*
 	 * == Public entry point: dispatch a :run sub-command by name ==
 	 *
-	 * Searches run_table[] for an entry whose name matches argv[0] and calls
-	 * its handler.  Reports an error on the status bar if the name is not
-	 * found.  All built-in :run commands are registered in run_table[].
+	 * Flushes the gap to end-of-content so all run handlers see a flat
+	 * buffer — they use raw p++ loops and UNDO_SWAP which require
+	 * contiguous bytes.  Saves all live pointers as logical positions,
+	 * flushes, then restores before dispatching.
 	 */
-	int i;
+	int lrs, lre, ldot, lsb, lmarks[30], mi, i;
 
 	if (argc < 1)
 		return;
+
+	lrs = logical_pos(g, rs);
+	lre = logical_pos(g, re);
+	ldot = logical_pos(g, g->dot);
+	lsb = logical_pos(g, g->screenbegin);
+	for (mi = 0; mi < 30; mi++)
+		lmarks[mi] = g->mark[mi] ? logical_pos(g, g->mark[mi]) : -1;
+
+	gap_flush(g);
+
+	rs = phys_ptr(g, lrs);
+	re = phys_ptr(g, lre);
+	g->dot = phys_ptr(g, ldot);
+	g->screenbegin = phys_ptr(g, lsb);
+	for (mi = 0; mi < 30; mi++)
+		if (lmarks[mi] >= 0)
+			g->mark[mi] = phys_ptr(g, lmarks[mi]);
+
 	for (i = 0; run_table[i].name != NULL; i++) {
 		if (strcmp(run_table[i].name, argv[0]) == 0) {
 			run_table[i].fn(g, argc, argv, rs, re);

@@ -20,6 +20,7 @@
 #include "textobj.h"
 
 #include "codepoint.h"
+#include "gap.h"
 #include "line.h"
 
 enum word_obj_class {
@@ -308,11 +309,22 @@ parse_tag_at(struct editor *g, char *lt, char **gt,
 		return 0;
 
 	*name_start = p;
-	while (p < g->end && is_tag_name_char((unsigned char)*p))
+	while (p < g->end) {
+		if (p == g->gap_start) {
+			p = g->gap_end;
+			continue;
+		}
+		if (!is_tag_name_char((unsigned char)*p))
+			break;
 		p++;
-	*name_len = p - *name_start;
+	}
+	*name_len = (size_t)(logical_pos(g, p) - logical_pos(g, *name_start));
 
 	while (p < g->end) {
+		if (p == g->gap_start) {
+			p = g->gap_end;
+			continue;
+		}
 		if (in_quote) {
 			if (*p == quote && !is_escaped_quote(g, p))
 				in_quote = 0;
@@ -334,9 +346,9 @@ parse_tag_at(struct editor *g, char *lt, char **gt,
 	*is_self_closing = 0;
 	if (!*is_closing) {
 		char *q = p;
-		while (q > lt + 1 && is_ascii_space((unsigned char)q[-1]))
-			q--;
-		if (q > lt + 1 && q[-1] == '/')
+		while (q > lt + 1 && is_ascii_space(buf_char_before(g, q)))
+			q = buf_prev(g, q);
+		if (q > lt + 1 && buf_char_before(g, q) == '/')
 			*is_self_closing = 1;
 	}
 
@@ -360,7 +372,7 @@ find_matching_closing_tag(struct editor *g, char *from,
 	char *p;
 	int depth = 1;
 
-	for (p = from; p < g->end; p++) {
+	for (p = from; p < g->end; p = buf_next(g, p)) {
 		if (*p == '<') {
 			char *gt;
 			char *tag_name;
