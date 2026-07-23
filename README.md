@@ -193,7 +193,7 @@ vic.c           command dispatch, main loop
 parser.c        MONRAS normal-mode command parser
 screen.c        virtual screen, diff/refresh
 buffer.c        insert, delete, file I/O
-gap.h           gap-buffer pointer helpers (inline)
+gap.c           gap-buffer pointer helpers
 undo.c          undo/redo stack
 operator.c      d/c/y/x/r/~ operators
 motion.c        cursor motions
