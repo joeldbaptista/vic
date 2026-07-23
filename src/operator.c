@@ -126,24 +126,96 @@ shared_yank_in(struct editor *g)
 		g->regtype[SHARED_REG] = PARTIAL;
 }
 
+static int
+private_dir(char *buf, size_t size)
+{
+	/*
+	 * == Resolve (and create) vic's private per-user runtime directory ==
+	 *
+	 * $XDG_CACHE_HOME/vic if set, otherwise $HOME/.cache/vic.  Deliberately
+	 * refuses (returns -1) rather than falling back to a shared location
+	 * like /tmp when $HOME is unset -- the session yank file written here
+	 * must never land somewhere other local users can plant a symlink.
+	 *
+	 * Creates missing path components with mode 0700, then verifies the
+	 * final directory is actually private (owned by us, no group/other
+	 * access) before reporting success.  An attacker who pre-created this
+	 * directory with looser permissions is thereby rejected instead of
+	 * silently trusted.
+	 */
+	const char *base = getenv("XDG_CACHE_HOME");
+	const char *home;
+	char parent[PATH_MAX];
+	char *sep;
+	struct stat st;
+
+	if (base && base[0]) {
+		if (snprintf(buf, size, "%s/vic", base) >= (int)size)
+			return -1;
+	} else {
+		home = getenv("HOME");
+		if (!home || !home[0])
+			return -1;
+		if (snprintf(buf, size, "%s/.cache/vic", home) >= (int)size)
+			return -1;
+	}
+
+	snprintf(parent, sizeof(parent), "%s", buf);
+	sep = strrchr(parent, '/');
+	if (sep && sep != parent) {
+		*sep = '\0';
+		mkdir(parent, 0700);
+	}
+	mkdir(buf, 0700);
+
+	if (lstat(buf, &st) < 0 || !S_ISDIR(st.st_mode) ||
+	    st.st_uid != geteuid() || (st.st_mode & (S_IRWXG | S_IRWXO)))
+		return -1;
+
+	return 0;
+}
+
+static int
+session_yank_path(struct editor *g, char *buf, size_t size)
+{
+	/*
+	 * == Build the path of the per-session yank file inside private_dir ==
+	 *
+	 * Named by session_epoch *and* pid so distinct vic processes never
+	 * collide even if two happen to start within the same second.
+	 */
+	char dir[PATH_MAX];
+
+	if (private_dir(dir, sizeof(dir)) < 0)
+		return -1;
+	if (snprintf(buf, size, "%s/session-%ld-%ld.dat", dir,
+	             (long)g->session_epoch, (long)getpid()) >= (int)size)
+		return -1;
+	return 0;
+}
+
 void
 yank_sync_out(struct editor *g)
 {
 	/*
 	 * == Write the current register to a per-session temp file ==
 	 *
-	 * The temp file lives at /tmp/vic-<epoch>.dat and lets ex commands
-	 * (e.g. :put) read the current register without going through a pipe.
+	 * The file lives in vic's private per-user cache directory (see
+	 * private_dir()) and lets ex commands (e.g. :put) read the current
+	 * register without going through a pipe.  O_NOFOLLOW is defence in
+	 * depth against symlink races; private_dir() is what actually makes
+	 * this safe by keeping the file out of a world-writable directory.
 	 * Errors are silently ignored.
 	 */
-	char path[64];
+	char path[PATH_MAX];
 	const char *s = g->reg[g->ydreg];
 	int fd;
 
 	if (!s)
 		return;
-	snprintf(path, sizeof(path), "/tmp/vic-%ld.dat", (long)g->session_epoch);
-	fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+	if (session_yank_path(g, path, sizeof(path)) < 0)
+		return;
+	fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0600);
 	if (fd < 0)
 		return;
 	full_write(fd, s, strlen(s));
@@ -156,15 +228,16 @@ yank_sync_in(struct editor *g)
 	/*
 	 * == Load the current register from the per-session temp file ==
 	 *
-	 * Counterpart to yank_sync_out: reads /tmp/vic-<epoch>.dat back into
-	 * the active register.  Used when ex commands place text there for
-	 * later :put.  No-op if the file does not exist.
+	 * Counterpart to yank_sync_out: reads the file back into the active
+	 * register.  Used when ex commands place text there for later :put.
+	 * No-op if the file does not exist.
 	 */
-	char path[64];
+	char path[PATH_MAX];
 	char *content;
 	size_t len;
 
-	snprintf(path, sizeof(path), "/tmp/vic-%ld.dat", (long)g->session_epoch);
+	if (session_yank_path(g, path, sizeof(path)) < 0)
+		return;
 	content = xmalloc_open_read_close(path, &len);
 	if (!content)
 		return;
