@@ -5,13 +5,15 @@ BusyBox and rewritten toward the suckless ideal: small source, no
 dependencies, predictable behaviour, and a codebase a single programmer
 can hold in their head.
 
-The text buffer is a plain dynamic array — one contiguous heap slab. There
-is no gap buffer, no rope, no piece table. Rob Pike's rules apply: keep the
-data structure simple, and the algorithms follow naturally. `data/erv.txt`,
-a 31 000-line file included in the repository, edits responsively with no
-perceptible lag. For the actual use cases of `vic` — source files, configuration
-files, prose — the array is fast enough, and the complexity that a fancier 
-structure would introduce is not justified.
+The text buffer is a gap buffer — one contiguous heap slab with a movable
+hole at the edit point. There is no rope, no piece table: Rob Pike's rules
+still apply, keep the data structure simple, and the algorithms follow
+naturally. A gap buffer keeps that simplicity (one allocation, plain
+pointer arithmetic, nothing to balance) while making the overwhelmingly
+common case — typing at the cursor — O(1) instead of an O(n) `memmove` on
+every keystroke; only jumping elsewhere to edit pays to relocate the gap.
+`data/erv.txt`, a 31 000-line file included in the repository, edits
+responsively with no perceptible lag.
 
 ## Background
 
@@ -139,12 +141,17 @@ Languages and extensions:
 
 ### Philosophy
 
-The project follows [Rob Pike's five programming rules](PRINCIPLES.md). Rule 3
-and Rule 4 govern the data structure choice: a plain dynamic array is the
-simplest correct representation of a text buffer. A gap buffer or rope would
-reduce the asymptotic cost of edits in large files, but Pike's rules say
-not to pay that complexity cost until measurement demands it. For the files
-people actually edit, the array is fine.
+The project follows [Rob Pike's five programming rules](PRINCIPLES.md). Rule 4
+lists array among the small set of data structures that cover almost all
+practical programs, and the gap buffer stays inside that list: it is still
+one array, just with a second pair of pointers (`gap_start`, `gap_end`)
+marking a movable hole — not a rope or a tree of fragments. Rule 3's caveat
+is what justified the change: n does get big enough to matter here, because
+a plain array pays an O(n) `memmove` of everything after the edit point on
+every single insert or delete, and `vic`'s single most common operation is
+inserting one character at a time while typing. The gap buffer collapses
+that to O(1) whenever the gap already sits at the cursor, which it does
+for any run of sequential typing.
 
 Behaviour is encoded as data where possible — dispatch tables, option
 bitmasks, colorizer function pointers — rather than hardcoded control flow.
@@ -160,17 +167,24 @@ structs, no external dependencies.
 ### Buffer model
 
 ```
-g->text                               g->end
-|                                         |
-[  h  e  l  l  o  \n  w  o  r  l  d  \n ]
-                ^
-               g->dot  (cursor)
+g->text                                                    g->end
+|                                                              |
+[  h  e  l  l  o  \n  ·  ·  ·  ·  ·  ·  w  o  r  l  d  \n    ]
+                    ^                ^
+              gap_start          gap_end
 ```
 
-`text`, `end`, and all interior pointers (`dot`, `screenbegin`, `mark[]`)
-are pointers into one heap slab. Insert and delete are O(n) memmove from
-the edit point to `end`. Capacity doubles up to 1 MB then grows by 1 MB
-increments. The sentinel newline at `end - 1` is always maintained.
+`text` and `end` bound one heap slab, same as a flat array. A movable gap
+— `[gap_start, gap_end)`, shown as `·` above — sits between the pre- and
+post-gap content and holds spare, zero-filled capacity. Inserting at
+`gap_start` just writes into the gap and advances it: O(1). Editing
+somewhere else first calls `gap_move_to`, which slides the gap to the new
+position with one `memmove` — O(n), the same cost a flat array pays on
+*every* edit, but here paid only when the edit point jumps rather than on
+every keystroke. `dot`, `screenbegin`, and `mark[]` are physical pointers
+into the same slab and get rewritten whenever the gap moves or the slab is
+reallocated. Capacity doubles up to 1 MB then grows by 1 MB increments.
+The sentinel newline immediately before `end` is always maintained.
 
 ### Module structure
 
@@ -179,6 +193,7 @@ vic.c           command dispatch, main loop
 parser.c        MONRAS normal-mode command parser
 screen.c        virtual screen, diff/refresh
 buffer.c        insert, delete, file I/O
+gap.h           gap-buffer pointer helpers (inline)
 undo.c          undo/redo stack
 operator.c      d/c/y/x/r/~ operators
 motion.c        cursor motions
