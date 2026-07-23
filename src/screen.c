@@ -386,6 +386,7 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 	shown_cols = 0;
 	while (shown_cols < text_cols) {
 		char *next;
+		char *cend;
 		int width;
 		int new_visual;
 		int new_hl;
@@ -396,6 +397,17 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 			break;
 		next = cp_next(g, src);
 
+		/*
+		 * next may have jumped the entire gap (cp_next lands on gap_end
+		 * once the codepoint's own bytes end at gap_start).  The gap is
+		 * always at a codepoint boundary, so the character itself never
+		 * straddles it — cend is the true physical end of its bytes,
+		 * used for every length computation below.  next stays the
+		 * gap-jumped pointer so src correctly skips the gap next
+		 * iteration.
+		 */
+		cend = (src < g->gap_start && next == g->gap_end) ? g->gap_start : next;
+
 		/* Skip bare continuation bytes (0x80–0xBF) and truncated multi-byte
 		 * lead sequences.  These arise when multi-byte characters are being
 		 * inserted one byte at a time and a redraw occurs mid-sequence.
@@ -404,7 +416,7 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 		{
 			unsigned char fb = (unsigned char)*src;
 			if (fb >= 0x80) {
-				size_t have = (size_t)(next - src);
+				size_t have = (size_t)(cend - src);
 				size_t need = fb < 0xC0   ? 0
 				              : fb < 0xE0 ? 2
 				              : fb < 0xF0 ? 3
@@ -484,10 +496,10 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 			continue;
 		}
 
-		width = utf8_cell_width(src, next);
+		width = utf8_cell_width(src, cend);
 		if (width <= 0) {
 			if (co > ofs && shown_cols > 0) {
-				size_t blen = (size_t)(next - src);
+				size_t blen = (size_t)(cend - src);
 				if (dest + blen <= dest_end) {
 					memcpy(dest, src, blen);
 					dest += blen;
@@ -510,9 +522,9 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 		if (shown_cols + width > text_cols)
 			break;
 
-		if (dest + (next - src) <= dest_end) {
-			memcpy(dest, src, (size_t)(next - src));
-			dest += (next - src);
+		if (dest + (cend - src) <= dest_end) {
+			memcpy(dest, src, (size_t)(cend - src));
+			dest += (cend - src);
 		}
 		co += width;
 		shown_cols += width;

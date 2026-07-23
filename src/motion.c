@@ -364,7 +364,7 @@ motion_run_goto_line_cmd(struct editor *g)
 	 * With a count n: jumps to line n (1-based), landing on the first
 	 * non-blank character.
 	 */
-	g->dot = g->end - 1;
+	g->dot = buf_prev(g, buf_end(g));
 	if (g->cmdcnt > 0)
 		g->dot = find_line(g, g->cmdcnt);
 	dot_begin(g);

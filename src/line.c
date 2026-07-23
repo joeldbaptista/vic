@@ -87,7 +87,7 @@ prev_line(struct editor *g, char *p)
 	 */
 	p = begin_line(g, p);
 	if (p > g->text && buf_char_before(g, p) == '\n')
-		p--;
+		p = buf_prev(g, p);
 	p = begin_line(g, p);
 	return p;
 }

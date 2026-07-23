@@ -184,6 +184,15 @@ text_hole_make(struct editor *g, char *p, int size)
 
 	gap_move_to(g, p);
 
+	/*
+	 * gap_move_to sets gap_start == p only when the gap moved left (or
+	 * was already there).  When it moved right to reach p, the reserved
+	 * bytes land at gap_start instead, which is (gap size) behind p.
+	 * Fold that shift into the returned bias so p + bias always points
+	 * at the newly reserved region.
+	 */
+	bias += (uintptr_t)(g->gap_start - p);
+
 	/* Consume `size' bytes from the gap (they become pre-gap content). */
 	g->gap_start += size;
 
@@ -492,7 +501,7 @@ init_text_buffer(struct editor *g, char *fn)
 
 	update_filename(g, fn);
 	rc = file_insert(g, fn, g->text, 1);
-	if (rc <= 0 || *(g->end - 1) != '\n') {
+	if (rc <= 0 || buf_char_before(g, buf_end(g)) != '\n') {
 		char_insert(g, g->end, '\n', NO_UNDO);
 	}
 
