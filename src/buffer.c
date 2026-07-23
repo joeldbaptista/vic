@@ -73,7 +73,9 @@ gap_move_to(struct editor *g, char *p)
  * gap_grow — grow the allocation so the gap has room for at least `needed'
  * additional bytes.  Adjusts all interior pointers (dot, screenbegin, marks,
  * gap boundaries, and the caller's *pp) for both the realloc base change and
- * the post-gap content relocation.  Returns the realloc bias.
+ * the post-gap content relocation.  Returns the total shift applied to *pp
+ * (the realloc bias, plus the post-gap relocation delta if *pp itself was
+ * on the far side of the gap) — i.e. exactly (*pp after) - (*pp before).
  */
 static uintptr_t
 gap_grow(struct editor *g, char **pp, int needed)
@@ -83,6 +85,7 @@ gap_grow(struct editor *g, char **pp, int needed)
 	int after_size;
 	int delta;
 	uintptr_t bias;
+	int pp_after_gap;
 	int i;
 
 	after_size = (int)(g->text + g->text_size - g->gap_end);
@@ -130,7 +133,8 @@ gap_grow(struct editor *g, char **pp, int needed)
 	for (i = 0; i < (int)ARRAY_SIZE(g->mark); i++)
 		if (g->mark[i] && g->mark[i] >= g->gap_end)
 			g->mark[i] += delta;
-	if (*pp >= g->gap_end)
+	pp_after_gap = (*pp >= g->gap_end);
+	if (pp_after_gap)
 		*pp += delta;
 
 	/* Move after-gap content to the end of the new (larger) allocation. */
@@ -142,7 +146,16 @@ gap_grow(struct editor *g, char **pp, int needed)
 	g->text_size = new_size;
 	g->end = g->text + new_size;
 
-	return bias;
+	/*
+	 * The caller (text_hole_make) uses this return value as the amount
+	 * to add to any pointer that was equal to the original *pp in order
+	 * to track it through the grow.  That must match the total shift
+	 * *pp itself just received above: the realloc bias, plus `delta' if
+	 * *pp lay on the far (post-gap) side of the gap.  Returning just the
+	 * realloc bias here silently drops the `delta' term for post-gap
+	 * insertion points, which corrupts the caller's tracked pointer.
+	 */
+	return pp_after_gap ? bias + (uintptr_t)delta : bias;
 }
 
 /* ---------------------------------------------------------------------------
