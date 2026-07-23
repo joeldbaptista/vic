@@ -35,97 +35,6 @@ enum {
 	YANKDEL = TRUE,
 };
 
-static void
-shared_yank_path(char *buf, size_t size)
-{
-	/*
-	 * == Build the filesystem path for the shared (+) yank register ==
-	 *
-	 * Uses $XDG_CACHE_HOME/vic/yank if set, otherwise $HOME/.cache/vic/yank.
-	 * Writes into buf (size bytes).
-	 */
-	const char *base;
-	const char *home;
-
-	base = getenv("XDG_CACHE_HOME");
-	if (base && base[0]) {
-		snprintf(buf, size, "%s/vic/yank", base);
-		return;
-	}
-	home = getenv("HOME");
-	if (!home || !home[0])
-		home = "/tmp";
-	snprintf(buf, size, "%s/.cache/vic/yank", home);
-}
-
-static void
-shared_yank_out(struct editor *g)
-{
-	/*
-	 * == Persist the shared register (+) to the yank-file on disk ==
-	 *
-	 * Creates the parent directories if necessary, then writes the full
-	 * register contents.  Errors are silently ignored (best-effort).
-	 */
-	char path[PATH_MAX];
-	char dir[PATH_MAX];
-	char *sep;
-	int fd;
-	const char *s;
-
-	s = g->reg[SHARED_REG];
-	if (!s)
-		return;
-	shared_yank_path(path, sizeof(path));
-	snprintf(dir, sizeof(dir), "%s", path);
-	sep = strrchr(dir, '/');
-	if (sep) {
-		char *sep2;
-
-		*sep = '\0';
-		sep2 = strrchr(dir, '/');
-		if (sep2) {
-			*sep2 = '\0';
-			mkdir(dir, 0700);
-			*sep2 = '/';
-		}
-		mkdir(dir, 0700);
-	}
-	fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-	if (fd < 0)
-		return;
-	full_write(fd, s, strlen(s));
-	close(fd);
-}
-
-void
-shared_yank_in(struct editor *g)
-{
-	/*
-	 * == Load the shared (+) register from the yank-file on disk ==
-	 *
-	 * Reads the file written by shared_yank_out (or a compatible tool
-	 * such as xclip).  Sets regtype based on whether the content contains
-	 * newlines.  No-op if the file does not exist.
-	 */
-	char path[PATH_MAX];
-	char *content;
-	size_t len;
-
-	shared_yank_path(path, sizeof(path));
-	content = xmalloc_open_read_close(path, &len);
-	if (!content)
-		return;
-	free(g->reg[SHARED_REG]);
-	g->reg[SHARED_REG] = content;
-	if (len > 0 && content[len - 1] == '\n')
-		g->regtype[SHARED_REG] = WHOLE;
-	else if (memchr(content, '\n', len))
-		g->regtype[SHARED_REG] = MULTI;
-	else
-		g->regtype[SHARED_REG] = PARTIAL;
-}
-
 static int
 private_dir(char *buf, size_t size)
 {
@@ -173,6 +82,82 @@ private_dir(char *buf, size_t size)
 		return -1;
 
 	return 0;
+}
+
+static int
+shared_yank_path(char *buf, size_t size)
+{
+	/*
+	 * == Build the path of the shared (+) yank register inside private_dir ==
+	 *
+	 * Returns 0 on success, -1 if the private directory could not be
+	 * resolved (see private_dir()) -- callers must then skip the sync
+	 * entirely rather than fall back to a shared location such as /tmp.
+	 */
+	char dir[PATH_MAX];
+
+	if (private_dir(dir, sizeof(dir)) < 0)
+		return -1;
+	if (snprintf(buf, size, "%s/yank", dir) >= (int)size)
+		return -1;
+	return 0;
+}
+
+static void
+shared_yank_out(struct editor *g)
+{
+	/*
+	 * == Persist the shared register (+) to the yank-file on disk ==
+	 *
+	 * private_dir() (via shared_yank_path) has already verified the
+	 * containing directory is private to us; O_NOFOLLOW is defence in
+	 * depth against a symlink planted there before that check ran.
+	 * Errors are silently ignored (best-effort).
+	 */
+	char path[PATH_MAX];
+	int fd;
+	const char *s;
+
+	s = g->reg[SHARED_REG];
+	if (!s)
+		return;
+	if (shared_yank_path(path, sizeof(path)) < 0)
+		return;
+	fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0600);
+	if (fd < 0)
+		return;
+	full_write(fd, s, strlen(s));
+	close(fd);
+}
+
+void
+shared_yank_in(struct editor *g)
+{
+	/*
+	 * == Load the shared (+) register from the yank-file on disk ==
+	 *
+	 * Reads the file written by shared_yank_out (or a compatible tool
+	 * such as xclip).  Sets regtype based on whether the content contains
+	 * newlines.  No-op if the file does not exist or the private
+	 * directory could not be resolved.
+	 */
+	char path[PATH_MAX];
+	char *content;
+	size_t len;
+
+	if (shared_yank_path(path, sizeof(path)) < 0)
+		return;
+	content = xmalloc_open_read_close(path, &len);
+	if (!content)
+		return;
+	free(g->reg[SHARED_REG]);
+	g->reg[SHARED_REG] = content;
+	if (len > 0 && content[len - 1] == '\n')
+		g->regtype[SHARED_REG] = WHOLE;
+	else if (memchr(content, '\n', len))
+		g->regtype[SHARED_REG] = MULTI;
+	else
+		g->regtype[SHARED_REG] = PARTIAL;
 }
 
 static int
