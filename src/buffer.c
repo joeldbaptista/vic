@@ -37,25 +37,33 @@ static void
 gap_move_to(struct editor *g, char *p)
 {
 	int shift;
+	int gap_size = (int)(g->gap_end - g->gap_start);
 
 	if (p == g->gap_start)
 		return;
 
 	if (p < g->gap_start) {
-		/* Move gap left: slide [p, gap_start) into the gap's right end. */
+		/*
+		 * Move gap left: slide [p, gap_start) into the gap's right end.
+		 * The gap keeps its size; only its position changes, so the
+		 * zeroed span must be exactly gap_size, not `shift'.  When the
+		 * move distance exceeds the gap size (e.g. editing near the
+		 * start of a large file whose gap still sits at the tail),
+		 * zeroing `shift' bytes instead would stomp on the real
+		 * content that the memmove just relocated into the tail of
+		 * that same range.
+		 */
 		shift = (int)(g->gap_start - p);
 		memmove(g->gap_end - shift, p, (size_t)shift);
-		memset(p, 0, (size_t)shift);
+		memset(p, 0, (size_t)gap_size);
 		g->gap_end -= shift;
 		g->gap_start = p;
 	} else {
-		/* p >= gap_end: move gap right. */
-		/* slide [gap_end, p) into the gap's left end */
+		/* p >= gap_end: move gap right; slide [gap_end, p) into the
+		 * gap's left end.  Same fixed-size zeroing rationale as above. */
 		shift = (int)(p - g->gap_end);
 		memmove(g->gap_start, g->gap_end, (size_t)shift);
-		memset(g->gap_end + shift - (g->gap_end - g->gap_start), 0,
-		       (size_t)(g->gap_end - g->gap_start)); /* clear stale copy */
-		memset(g->gap_end, 0, (size_t)shift);        /* zero moved area */
+		memset(p - gap_size, 0, (size_t)gap_size);
 		g->gap_start += shift;
 		g->gap_end = p;
 	}
