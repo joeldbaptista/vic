@@ -884,7 +884,7 @@ do_put(struct editor *g, int before)
 			cnt = i * strlen(p) - 1;
 	}
 	do {
-		string_insert(g, g->dot, p, allow_undo);
+		g->dot += string_insert(g, g->dot, p, allow_undo);
 		allow_undo = ALLOW_UNDO_CHAIN;
 	} while (--g->cmdcnt > 0);
 	g->dot += cnt;
