@@ -556,7 +556,15 @@ undo_save(struct editor *g, const char *fn)
 		arr[i++] = e;
 	/* arr[0] = newest (tail), arr[n-1] = oldest (deepest) */
 
-	fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+	/*
+	 * O_NOFOLLOW: this path sits next to the edited file, in a directory
+	 * vic does not control the permissions of.  Without it, another user
+	 * with write access to that directory could pre-plant a symlink at
+	 * ".basename.vundo" and have this O_TRUNC write clobber an arbitrary
+	 * file the victim owns.  A regular file left by a previous session
+	 * (the normal, intended case) still opens and truncates fine.
+	 */
+	fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0600);
 	free(path);
 	if (fd < 0) {
 		free(arr);
@@ -615,7 +623,10 @@ undo_load(struct editor *g, const char *fn)
 		return;
 
 	path = undofile_path(fn);
-	fd = open(path, O_RDONLY);
+	/* O_NOFOLLOW: don't read through a symlink planted at this path by
+	 * another user of the directory -- see the matching open() in
+	 * undo_save() for the full rationale. */
+	fd = open(path, O_RDONLY | O_NOFOLLOW);
 	free(path);
 	if (fd < 0)
 		return; /* no sidecar — normal for a new or first-opened file */
