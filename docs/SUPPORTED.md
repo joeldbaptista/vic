@@ -47,7 +47,7 @@ Last updated: 2026-04-16.
   - Yank stores column content per row; each row is newline-separated in the register with type BLOCK.
   - Lines that do not reach the left column of the block are skipped by operators.
   - `I` enters insert mode at the left column of the block on the first row; on ESC the typed text is replayed at the same column on every remaining row in the block that reaches that column.
-  - Put of a BLOCK-type register is not yet supported.
+  - `p`/`P` outside visual mode splice a BLOCK-type register back in as a rectangle: `P` at the cursor's column, `p` one column to its right. Existing rows too short to reach that column are skipped; rows past the last line of the buffer are appended, padded with spaces to the column. Pasting a BLOCK-type register while still inside a live block-visual selection (`p` in Ctrl-V mode, replacing the selection) is not yet supported.
 - Text objects under operator/visual workflows:
   - Word: `iw`, `aw`, `iW`, `aW`
   - Quotes/backtick: `i"`, `a"`, `i'`, `a'`, ``i` ``, ``a` ``
