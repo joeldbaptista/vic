@@ -685,6 +685,238 @@ run_visual_highlight(const char *vi_path, const char *tmp_dir)
 }
 
 static int
+run_backspace_past_bof(const char *vi_path, const char *tmp_dir)
+{
+	/*
+	 * run_backspace_past_bof — backspacing past the start of the buffer
+	 * in INSERT mode must not crash, leak gap bytes onto the screen, or
+	 * delete into content that was never typed this session.
+	 *
+	 * Three distinct bugs lived here, all raw-pointer-across-the-gap
+	 * mistakes surfaced by dot legitimately resting at gap_end (not just
+	 * gap_start) after a delete:
+	 *   - char_insert's backspace branch built the deletion range's end
+	 *     with p - 1 instead of a gap-aware step, reading into the gap's
+	 *     zeroed interior once p was gap_end.
+	 *   - char_insert's ESC handler and the backspace guard itself both
+	 *     compared g->dot/p > g->text as raw pointers to mean "is there
+	 *     anything before this position," which is true physically
+	 *     whenever dot rests on the far side of a non-empty gap even
+	 *     though it is logically at position 0 -- letting one extra
+	 *     backspace delete into real content that was already there
+	 *     before this INSERT session started.
+	 * Typed content is "hello\nworld\n" plus 4 Enters at the top, then 10
+	 * backspaces: 4 undo the Enters, the rest must be no-ops, leaving the
+	 * original file untouched.
+	 */
+	const char *name = "backspace-past-bof";
+	char path[512];
+	int master, rc, timed_out, ok;
+	pid_t pid;
+	struct buf out;
+	size_t mark;
+
+	snprintf(path, sizeof(path), "%s/vic_backspace_past_bof.txt", tmp_dir);
+	write_file(path, "hello\nworld\n");
+
+	master = open_master_pty();
+	if (master < 0)
+		return 0;
+	pid = spawn_vic(master, vi_path, path);
+	if (pid < 0) {
+		close(master);
+		return 0;
+	}
+
+	buf_init(&out);
+	wait_startup(master, pid, &out, basename_of(path), STARTUP_TIMEOUT);
+	pump_output(master, pid, &out, STARTUP_SETTLE);
+
+	write_all(master, (const unsigned char *)"i\r\r\r\r", 5);
+	pump_output(master, pid, &out, 0.40);
+	mark = out.len;
+	write_all(master, (const unsigned char *)"\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f", 10);
+
+	ok = (pump_output(master, pid, &out, 0.40) < 0);
+	if (ok)
+		ok = (xmemmem(out.data + mark, out.len - mark, "^@", 2) == NULL);
+
+	write_all(master, (const unsigned char *)"\x1b:write\r", 9);
+	rc = finish(pump_output(master, pid, &out, FINISH_TIMEOUT), pid, &timed_out);
+	close(master);
+
+	if (ok) {
+		char *content = read_file(path);
+		ok = content && strcmp(content, "hello\nworld\n") == 0;
+		free(content);
+	}
+
+	printf("[%s] rc=%d timed_out=%s\n", name, rc, timed_out ? "True" : "False");
+	if (ok)
+		printf("[%s] PASS\n", name);
+	else {
+		printf("[%s] FAIL\n", name);
+		printf("[%s] vic crashed, leaked a NUL glyph, or corrupted content on overshoot backspace\n",
+		       name);
+	}
+	printf("[%s] file: %s\n", name, path);
+
+	buf_free(&out);
+	return ok;
+}
+
+static int
+run_enter_at_bof_status_line(const char *vi_path, const char *tmp_dir)
+{
+	/*
+	 * run_enter_at_bof_status_line — the status line's "current/total"
+	 * line count must update on the very first Enter typed in INSERT
+	 * mode, not lag by one keystroke.
+	 *
+	 * Insert-mode keystrokes go through the queued undo path, which
+	 * batches several of them into one undo unit and only bumps
+	 * modified_count when that batch commits -- not synchronously per
+	 * keystroke. total_line_count()'s cache (and, until fixed, a second
+	 * cache layer in format_edit_status) was keyed on modified_count, so
+	 * the very first '\n' typed in a fresh INSERT session -- e.g. right
+	 * after opening a file and pressing Enter at the top -- left the
+	 * status line showing the pre-edit total for one redraw. The buffer
+	 * itself was never wrong; this is a display-only regression test.
+	 */
+	const char *name = "enter-at-bof-status-line";
+	const char *stale = "2/2 100%";
+	const char *fresh = "2/3 66%";
+	char path[512];
+	int master, rc, timed_out, ok;
+	pid_t pid;
+	struct buf out;
+	size_t mark;
+
+	snprintf(path, sizeof(path), "%s/vic_enter_bof_status.txt", tmp_dir);
+	write_file(path, "hello\nworld\n");
+
+	master = open_master_pty();
+	if (master < 0)
+		return 0;
+	pid = spawn_vic(master, vi_path, path);
+	if (pid < 0) {
+		close(master);
+		return 0;
+	}
+
+	buf_init(&out);
+	wait_startup(master, pid, &out, basename_of(path), STARTUP_TIMEOUT);
+	pump_output(master, pid, &out, STARTUP_SETTLE);
+
+	write_all(master, (const unsigned char *)"i", 1);
+	pump_output(master, pid, &out, 0.40);
+	mark = out.len;
+	write_all(master, (const unsigned char *)"\r", 1);
+	pump_output(master, pid, &out, 0.40);
+
+	ok = (xmemmem(out.data + mark, out.len - mark, fresh, strlen(fresh)) != NULL) &&
+	     (xmemmem(out.data + mark, out.len - mark, stale, strlen(stale)) == NULL);
+
+	write_all(master, (const unsigned char *)"\x1b:q!\r", 5);
+	rc = finish(pump_output(master, pid, &out, FINISH_TIMEOUT), pid, &timed_out);
+	close(master);
+
+	printf("[%s] rc=%d timed_out=%s\n", name, rc, timed_out ? "True" : "False");
+	if (ok)
+		printf("[%s] PASS\n", name);
+	else {
+		printf("[%s] FAIL\n", name);
+		printf("[%s] status line after the first Enter did not show \"%s\"\n",
+		       name, fresh);
+	}
+	printf("[%s] file: %s\n", name, path);
+
+	buf_free(&out);
+	return ok;
+}
+
+static int
+run_dd_top_no_gap_leak(const char *vi_path, const char *tmp_dir)
+{
+	/*
+	 * run_dd_top_no_gap_leak — dd'ing the first line must not render gap
+	 * bytes.
+	 *
+	 * Loading a file from disk parks the gap in a spot that doesn't
+	 * trigger this, so the lines have to be typed interactively (matching
+	 * how the bug was actually hit: open a new file, insert several
+	 * lines, save, then dd from the top) to leave the gap sitting right
+	 * at the buffer's start. After a line is deleted from the very start
+	 * of the buffer, the gap moves to offset 0. g->screenbegin is left
+	 * unchanged (still 0), which is now the *gap_start* side of that
+	 * boundary rather than gap_end — logically the same position, but
+	 * physically wrong: reading from it exposes the gap's zeroed interior
+	 * as literal NUL bytes on screen. Regression test for that
+	 * gap-vs-content-pointer confusion.
+	 */
+	const char *name = "dd-top-no-gap-leak";
+	char path[512];
+	int master, rc, timed_out, ok;
+	pid_t pid;
+	struct buf out;
+	size_t before_dd;
+	const char *setup = "iaaa\rbbb\rccc\x1b:write\rgg";
+
+	snprintf(path, sizeof(path), "%s/vic_dd_top_no_gap_leak.txt", tmp_dir);
+	if (remove(path) != 0 && errno != ENOENT) {
+		fprintf(stderr, "[%s] failed to clear temp file\n", name);
+		return 0;
+	}
+
+	master = open_master_pty();
+	if (master < 0)
+		return 0;
+	pid = spawn_vic(master, vi_path, path);
+	if (pid < 0) {
+		close(master);
+		return 0;
+	}
+
+	buf_init(&out);
+	wait_startup(master, pid, &out, basename_of(path), STARTUP_TIMEOUT);
+	pump_output(master, pid, &out, STARTUP_SETTLE);
+	write_all(master, (const unsigned char *)setup, strlen(setup));
+	pump_output(master, pid, &out, 0.40);
+
+	before_dd = out.len;
+	write_all(master, (const unsigned char *)"dd", 2);
+
+	/* pump_output returns >= 0 the moment it reaps the child, instead of
+	 * -1 for "still running" -- a non-negative result here means vic
+	 * died (crashed or otherwise exited) from just "dd", which is itself
+	 * a failure distinct from the NUL-glyph check below. */
+	ok = (pump_output(master, pid, &out, 0.40) < 0);
+
+	/* A NUL content byte is rendered as the two-character "^@" control
+	 * picture, not a raw 0x00 -- that literal string is the signature. */
+	if (ok)
+		ok = (xmemmem(out.data + before_dd, out.len - before_dd, "^@", 2) == NULL);
+
+	write_all(master, (const unsigned char *)":q!\r", 4);
+	rc = finish(pump_output(master, pid, &out, FINISH_TIMEOUT), pid, &timed_out);
+	close(master);
+
+	printf("[%s] rc=%d timed_out=%s\n", name, rc, timed_out ? "True" : "False");
+	if (ok)
+		printf("[%s] PASS\n", name);
+	else {
+		printf("[%s] FAIL\n", name);
+		printf("[%s] vic crashed, or a NUL byte (\"^@\") appeared in "
+		       "terminal output, after dd\n",
+		       name);
+	}
+	printf("[%s] file: %s\n", name, path);
+
+	buf_free(&out);
+	return ok;
+}
+
+static int
 run_visual_esc_clear(const char *vi_path, const char *tmp_dir)
 {
 	const char *name = "visual-esc-clears-highlight";
@@ -911,6 +1143,14 @@ static const struct tc cases[] = {
     TC("dot-repeat-shift", ">>.:write\r", "foo\n", "\t\tfoo\n"),
     TC("dot-repeat-replace-char", "r,l.:write\r", "abcde\n", ",,cde\n"),
     TC("dot-repeat-cc", "ccnew\x1bj.:write\r", "old\ntext\n", "new\nnew\n"),
+    /* cc with autoindent on, on the buffer's last line: the fresh indent
+     * must land on the new blank line, not get appended to the line above */
+    TC("autoindent-cc-last-line", ":set ai\rGccnew\x1b:write\r",
+       "  foo\n  old\n", "  foo\n  new\n"),
+    /* same, but on a middle line — the non-EOF path this branch was
+     * originally written for must still work */
+    TC("autoindent-cc-middle-line", ":set ai\rjccnew\x1b:write\r",
+       "  foo\n  old\n  bar\n", "  foo\n  new\n  bar\n"),
     TC("dot-repeat-ciw", "wciwnew\x1b"
                          "0.:write\r",
        "foo bar\n", "new new\n"),
@@ -1081,6 +1321,12 @@ main(int argc, char *argv[])
 		all_ok = run_visual_esc_clear(vi_path, tmp_dir) && all_ok;
 	if (matches_filter("visual-block-highlight-c", filter))
 		all_ok = run_block_visual_highlight_c(vi_path, tmp_dir) && all_ok;
+	if (matches_filter("dd-top-no-gap-leak", filter))
+		all_ok = run_dd_top_no_gap_leak(vi_path, tmp_dir) && all_ok;
+	if (matches_filter("enter-at-bof-status-line", filter))
+		all_ok = run_enter_at_bof_status_line(vi_path, tmp_dir) && all_ok;
+	if (matches_filter("backspace-past-bof", filter))
+		all_ok = run_backspace_past_bof(vi_path, tmp_dir) && all_ok;
 
 	return all_ok ? 0 : 1;
 }
