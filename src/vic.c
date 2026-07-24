@@ -838,6 +838,96 @@ run_zz_cmd(struct editor *g, const struct cmd_ctx *ctx)
 }
 
 static void
+do_put_block(struct editor *g, char *reg, int before)
+{
+	/*
+	 * == Paste a BLOCK-type register as a rectangle at the cursor ==
+	 *
+	 * reg holds one row per line, each terminated by '\n' (as produced by
+	 * a block-visual yank).  Row 0 lands on the current line at the target
+	 * column; each following row lands on the next line down, at the same
+	 * column.  Column is the cursor's column for P, one column right of it
+	 * for p.  Existing rows too short to reach the column are left
+	 * unchanged (the skip convention block operators already use); rows
+	 * past the last line of the buffer are appended as new lines, padded
+	 * with spaces up to the column so the rectangle stays aligned.
+	 *
+	 * Each row's target line is re-derived by logical line number
+	 * (find_line) right before it is used, rather than cached as a raw
+	 * pointer across earlier insertions: a gap move can relocate content
+	 * physically without a realloc, which would silently stale any
+	 * pointer held past the moved region. Logical positions are immune
+	 * to that, at the cost of an O(line count) walk per row — cheap next
+	 * to the string_insert it precedes.
+	 */
+	int col;
+	int rowcount;
+	char **rowtext;
+	int *rowlen;
+	int start_line;
+	char *q;
+	int i;
+	int allow_undo;
+
+	rowcount = 0;
+	for (q = reg; *q; q++)
+		if (*q == '\n')
+			rowcount++;
+	if (rowcount == 0)
+		return;
+
+	rowtext = xmalloc((size_t)rowcount * sizeof(*rowtext));
+	rowlen = xmalloc((size_t)rowcount * sizeof(*rowlen));
+	q = reg;
+	for (i = 0; i < rowcount; i++) {
+		char *nl = strchr(q, '\n');
+		rowtext[i] = q;
+		rowlen[i] = (int)(nl - q);
+		q = nl + 1;
+	}
+
+	col = get_column(g, g->dot) + (before ? 0 : 1);
+	start_line = count_lines(g, g->text, g->dot);
+	allow_undo = ALLOW_UNDO;
+
+	for (i = 0; i < rowcount; i++) {
+		int total = count_lines(g, g->text, g->end - 1);
+
+		if (start_line + i > total) {
+			char *pad = xmalloc((size_t)col + rowlen[i] + 2);
+			char *dst = pad;
+			int j;
+
+			*dst++ = '\n';
+			for (j = 0; j < col; j++)
+				*dst++ = ' ';
+			memcpy(dst, rowtext[i], (size_t)rowlen[i]);
+			dst[rowlen[i]] = '\0';
+			string_insert(g, g->end - 1, pad, allow_undo);
+			allow_undo = ALLOW_UNDO_CHAIN;
+			free(pad);
+		} else {
+			char *line = find_line(g, start_line + i);
+			char *ins = move_to_col(g, line, col);
+
+			if (get_column(g, ins) == col) {
+				char *text = xmalloc((size_t)rowlen[i] + 1);
+
+				memcpy(text, rowtext[i], (size_t)rowlen[i]);
+				text[rowlen[i]] = '\0';
+				string_insert(g, ins, text, allow_undo);
+				allow_undo = ALLOW_UNDO_CHAIN;
+				free(text);
+			}
+		}
+	}
+
+	g->dot = move_to_col(g, find_line(g, start_line), col);
+	free(rowtext);
+	free(rowlen);
+}
+
+static void
 do_put(struct editor *g, int before)
 {
 	/*
@@ -846,9 +936,11 @@ do_put(struct editor *g, int before)
 	 * Reads the active yank register (syncing from the shared clipboard if
 	 * needed).  For WHOLE (linewise) registers: positions dot at the line
 	 * before (P) or after (p) the current line.  For PARTIAL (characterwise)
-	 * registers: inserts at dot (P) or one character right (p).  Repeats
-	 * g->cmdcnt times, chaining undo entries.  Moves dot to the end of the
-	 * pasted text and resets the register.
+	 * registers: inserts at dot (P) or one character right (p).  For BLOCK
+	 * registers, splices the rectangle at the cursor column (see
+	 * do_put_block).  Repeats g->cmdcnt times for WHOLE/PARTIAL, chaining
+	 * undo entries.  Moves dot to the end of the pasted text and resets
+	 * the register.
 	 */
 	char *p;
 	int allow_undo;
@@ -862,6 +954,12 @@ do_put(struct editor *g, int before)
 	p = g->reg[g->ydreg];
 	if (p == NULL) {
 		status_line_bold(g, "Nothing in register %c", what_reg(g));
+		return;
+	}
+	if (g->regtype[g->ydreg] == BLOCK) {
+		do_put_block(g, p, before);
+		yank_status(g, "Put", p, 1);
+		reset_ydreg(g);
 		return;
 	}
 	allow_undo = ALLOW_UNDO;

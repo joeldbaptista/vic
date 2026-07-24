@@ -187,13 +187,15 @@ yank_sync_out(struct editor *g)
 	 *
 	 * The file lives in vic's private per-user cache directory (see
 	 * private_dir()) and lets ex commands (e.g. :put) read the current
-	 * register without going through a pipe.  O_NOFOLLOW is defence in
-	 * depth against symlink races; private_dir() is what actually makes
-	 * this safe by keeping the file out of a world-writable directory.
-	 * Errors are silently ignored.
+	 * register without going through a pipe.  The first byte is the
+	 * register's buftype (PARTIAL/WHOLE/MULTI/BLOCK); the rest is the raw
+	 * content.  O_NOFOLLOW is defence in depth against symlink races;
+	 * private_dir() is what actually makes this safe by keeping the file
+	 * out of a world-writable directory.  Errors are silently ignored.
 	 */
 	char path[PATH_MAX];
 	const char *s = g->reg[g->ydreg];
+	unsigned char type;
 	int fd;
 
 	if (!s)
@@ -203,6 +205,8 @@ yank_sync_out(struct editor *g)
 	fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0600);
 	if (fd < 0)
 		return;
+	type = (unsigned char)g->regtype[g->ydreg];
+	full_write(fd, &type, 1);
 	full_write(fd, s, strlen(s));
 	close(fd);
 }
@@ -214,8 +218,9 @@ yank_sync_in(struct editor *g)
 	 * == Load the current register from the per-session temp file ==
 	 *
 	 * Counterpart to yank_sync_out: reads the file back into the active
-	 * register.  Used when ex commands place text there for later :put.
-	 * No-op if the file does not exist.
+	 * register, restoring both content and buftype from the leading type
+	 * byte.  Used when ex commands place text there for later :put.
+	 * No-op if the file does not exist or is empty.
 	 */
 	char path[PATH_MAX];
 	char *content;
@@ -226,14 +231,15 @@ yank_sync_in(struct editor *g)
 	content = xmalloc_open_read_close(path, &len);
 	if (!content)
 		return;
+	if (len < 1) {
+		free(content);
+		return;
+	}
 	free(g->reg[g->ydreg]);
+	g->regtype[g->ydreg] = (unsigned char)content[0];
+	memmove(content, content + 1, len - 1);
+	content[len - 1] = '\0';
 	g->reg[g->ydreg] = content;
-	if (len > 0 && content[len - 1] == '\n')
-		g->regtype[g->ydreg] = WHOLE;
-	else if (memchr(content, '\n', len))
-		g->regtype[g->ydreg] = MULTI;
-	else
-		g->regtype[g->ydreg] = PARTIAL;
 }
 
 char *
