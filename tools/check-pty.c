@@ -971,6 +971,31 @@ static const struct tc cases[] = {
     TC("visual-block-insert-short", "0lll\x16"
                                     "2jIXX\x1b:write\r",
        "abcdefg\nkl\npqrstuv\n", "abcXXdefg\nkl\npqrXXstuv\n"),
+    /* block visual yank then put — round-trip through a BLOCK register.
+     * P splices the rectangle in starting at the cursor's own column;
+     * a register row with no matching existing line is appended. */
+    TC("visual-block-yank-put", "0lll\x16jllly"
+                                "G0P:write\r",
+       "abcdefghij\nklmnopqrst\n",
+       "abcdefghij\ndefgklmnopqrst\nnopq\n"),
+    /* p (lowercase) lands one column right of the cursor; the appended
+     * row is padded with spaces up to that column */
+    TC("visual-block-yank-put-after", "0lll\x16jllly"
+                                      "G0p:write\r",
+       "abcdefghij\nklmnopqrst\n",
+       "abcdefghij\nkdefglmnopqrst\n nopq\n"),
+    /* row too short to reach the target column is left unchanged, matching
+     * the skip convention of the other block operators; longer rows in the
+     * same put still get spliced */
+    TC("visual-block-put-short-row", "4G0lll\x16jjy"
+                                     "gg0lllP:write\r",
+       "abcdefg\nkl\npqrstuv\nABCDEFG\nHIJKLMN\nOPQRSTU\n",
+       "abcDdefg\nkl\npqrRstuv\nABCDEFG\nHIJKLMN\nOPQRSTU\n"),
+    /* rows beyond the last buffer line are appended, padded to the column */
+    TC("visual-block-put-appends-lines", "0ll\x16jjly"
+                                         "Gk0p:write\r",
+       "1YBC\n2YEF\n3YHI\naXbc\ndXef\n",
+       "1YBC\n2YEF\n3YHI\naBCXbc\ndEFXef\n HI\n"),
     /* visual cut (C) — cut to default register, paste elsewhere */
     TC("visual-cut-char", "vllCj$p:write\r", "abcde\nXXX\n", "de\nXXXabc\n"),
     TC("visual-cut-line", "VCp:write\r", "one\ntwo\nthree\n", "two\none\nthree\n"),
