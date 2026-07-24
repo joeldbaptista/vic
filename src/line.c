@@ -29,12 +29,16 @@ begin_line(struct editor *g, char *p)
 	 * == Pointer to the first byte of the line containing p ==
 	 *
 	 * Searches backward from p for the preceding '\n' and returns the byte
-	 * immediately after it.  Returns g->text when p is on the first line.
+	 * immediately after it.  Returns the first real content byte when p is
+	 * on the first line -- g->text, unless the gap itself sits at the very
+	 * start of the buffer (gap_start == g->text, e.g. right after deleting
+	 * the former first line), in which case g->text is inside the gap and
+	 * the first real byte is g->gap_end instead.
 	 */
 	if (p > g->text) {
 		p = memrchr(g->text, '\n', p - g->text);
 		if (!p)
-			return g->text;
+			return g->gap_start == g->text ? g->gap_end : g->text;
 		return buf_next(g, p);
 	}
 	return p;
@@ -47,13 +51,19 @@ end_line(struct editor *g, char *p)
 	 * == Pointer to the newline that terminates the line at p ==
 	 *
 	 * Searches forward from p for '\n'.  Returns the sentinel newline at
-	 * g->end - 1 when the line has no earlier terminator.
+	 * g->end - 1 when the line has no earlier terminator, and also when p
+	 * is already at or past that sentinel -- dot is allowed to legitimately
+	 * equal g->end elsewhere (one past the last byte), and a caller can
+	 * pass that straight through here; without this clamp the negative
+	 * length that g->end - p - 1 becomes past that point either corrupts
+	 * the memchr search or, taken as the unclamped p itself, propagates an
+	 * out-of-bounds position downstream.
 	 */
-	if (p < g->end - 1) {
-		p = memchr(p, '\n', g->end - p - 1);
-		if (!p)
-			return g->end - 1;
-	}
+	if (p >= g->end - 1)
+		return g->end - 1;
+	p = memchr(p, '\n', g->end - p - 1);
+	if (!p)
+		return g->end - 1;
 	return p;
 }
 

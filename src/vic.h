@@ -261,7 +261,6 @@ struct editor {
 
 	/* --- Modified tracking --- */
 	int modified_count;
-	int last_modified_count;
 
 	/* --- Search --- */
 	int last_search_char; /* codepoint, not byte */

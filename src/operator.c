@@ -420,7 +420,16 @@ operator_run_change_delete_yank_cmd(struct editor *g, const struct cmd_ctx *ctx)
 		if (c == 'c') {
 			g->cmd_mode = 1;
 			g->dot = char_insert(g, g->dot, '\n', ALLOW_UNDO_CHAIN);
-			if (g->dot != (g->end - 1) && !IS_AUTOINDENT(g))
+			/*
+			 * Compare logical positions, not raw pointers: right after
+			 * this insert, g->dot sits at gap_start while g->end - 1 is
+			 * physically on the far side of the gap. The two can be the
+			 * same content position (cursor already on the new blank
+			 * line at EOF) while being different physical pointers, and
+			 * a raw != would wrongly pull dot back to the previous line.
+			 */
+			if (logical_pos(g, g->dot) != logical_pos(g, g->end - 1) &&
+			    !IS_AUTOINDENT(g))
 				dot_prev(g);
 		} else if (c == 'd') {
 			dot_begin(g);

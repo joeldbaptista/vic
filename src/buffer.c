@@ -28,6 +28,78 @@
  * --------------------------------------------------------------------------- */
 
 /*
+ * struct side_positions / save_side_positions / restore_side_positions —
+ * carry screenbegin, marks, the visual anchor, and the Replace-mode start
+ * across a gap-buffer mutation by logical position rather than physical
+ * pointer.
+ *
+ * A gap move can physically relocate content -- a leftward move, for
+ * instance, memmove's everything between the target and the old gap_start
+ * into the gap's tail end.  Any of these stored pointers that happened to
+ * sit in the relocated span is left holding a stale address once that
+ * happens: still numerically valid (inside the allocation), but no longer
+ * pointing at the byte it used to.
+ *
+ * An earlier version of this fix tried to patch that up after the fact,
+ * by redirecting anything caught resting in [gap_start, gap_end) over to
+ * gap_end. That looked right immediately after the gap moved, but both
+ * callers advance one gap boundary further right after the move --
+ * text_hole_make consumes bytes by advancing gap_start, text_hole_delete
+ * by advancing gap_end -- and gap_end alone does not track that: the same
+ * physical address it pointed at can mean a different logical position by
+ * the time the whole operation is done. That patch quietly broke
+ * screenbegin specifically whenever an insert or delete landed at logical
+ * position 0, since screenbegin starts there on any file that fits on one
+ * screen.
+ *
+ * Logical position doesn't have this problem -- it is unaffected by
+ * *where* content physically lives, which is exactly what makes
+ * logical_pos()/phys_ptr() the right tool: capture before the mutation,
+ * restore after it has fully settled (gap moved *and* consumed/absorbed),
+ * and the round-trip is a no-op for anything the mutation didn't actually
+ * touch. Same pattern already used at the call-site level in undo.c,
+ * visual.c, and run.c; this just applies it at the two primitives
+ * themselves so every caller gets it for free.
+ *
+ * g->dot is deliberately NOT included: bound_dot's contract is that
+ * dot == gap_start is a valid resting position in its own right (the
+ * cursor after a sequential insert), and every caller that moves dot
+ * across a gap already sets it explicitly afterward. Restoring it here
+ * would fight that and defeat the O(1) sequential-insert fast path in
+ * gap_move_to's own p == gap_start early return.
+ */
+struct side_positions {
+	int screenbegin;
+	int visual_anchor; /* -1 = unset */
+	int rstart;         /* -1 = unset */
+	int mark[30];        /* -1 = unset; size matches struct editor's mark[] */
+};
+
+static void
+save_side_positions(struct editor *g, struct side_positions *sp)
+{
+	int i;
+
+	sp->screenbegin = logical_pos(g, g->screenbegin);
+	sp->visual_anchor = g->visual_anchor ? logical_pos(g, g->visual_anchor) : -1;
+	sp->rstart = g->rstart ? logical_pos(g, g->rstart) : -1;
+	for (i = 0; i < (int)ARRAY_SIZE(g->mark); i++)
+		sp->mark[i] = g->mark[i] ? logical_pos(g, g->mark[i]) : -1;
+}
+
+static void
+restore_side_positions(struct editor *g, const struct side_positions *sp)
+{
+	int i;
+
+	g->screenbegin = phys_ptr(g, sp->screenbegin);
+	g->visual_anchor = sp->visual_anchor >= 0 ? phys_ptr(g, sp->visual_anchor) : NULL;
+	g->rstart = sp->rstart >= 0 ? phys_ptr(g, sp->rstart) : NULL;
+	for (i = 0; i < (int)ARRAY_SIZE(g->mark); i++)
+		g->mark[i] = sp->mark[i] >= 0 ? phys_ptr(g, sp->mark[i]) : NULL;
+}
+
+/*
  * gap_move_to — relocate the gap so that gap_start == p.
  *
  * p must be a valid content pointer (< gap_start or >= gap_end).
@@ -196,9 +268,12 @@ text_hole_make(struct editor *g, char *p, int size)
 	 * allocation must add this value to it.
 	 */
 	uintptr_t bias = 0;
+	struct side_positions sp;
 
 	if (size <= 0)
 		return bias;
+
+	save_side_positions(g, &sp);
 
 	if ((int)(g->gap_end - g->gap_start) < size)
 		bias = gap_grow(g, &p, size);
@@ -217,6 +292,8 @@ text_hole_make(struct editor *g, char *p, int size)
 	/* Consume `size' bytes from the gap (they become pre-gap content). */
 	g->gap_start += size;
 
+	restore_side_positions(g, &sp);
+
 	return bias;
 }
 
@@ -232,6 +309,9 @@ text_hole_delete(struct editor *g, char *p, char *q, int undo)
 	 */
 	int lp, lq, hole_size;
 	char *result;
+	struct side_positions sp;
+
+	save_side_positions(g, &sp);
 
 	/* Normalise to logical offsets so gap movement doesn't invalidate q. */
 	lp = logical_pos(g, p);
@@ -274,6 +354,7 @@ text_hole_delete(struct editor *g, char *p, char *q, int undo)
 	g->gap_end += hole_size;
 
 thd0:
+	restore_side_positions(g, &sp);
 	result = g->gap_end;
 	if (result >= g->end)
 		result = g->gap_start > g->text ? g->gap_start - 1 : g->text;
@@ -378,8 +459,16 @@ char_insert(struct editor *g, char *p, char c, int undo)
 		g->cmdcnt = 0;
 		reset_ydreg(g);
 		g->last_status_cksum = 0;
-		if ((g->dot > g->text) && (buf_char_before(g, p) != '\n'))
-			p--;
+		/*
+		 * logical_pos, not a raw pointer compare: p can rest at gap_end
+		 * (e.g. right after a delete that landed dot there) while still
+		 * being logically at position 0, where g->dot > g->text would
+		 * wrongly read true.  Step back via buf_prev rather than p--
+		 * for the same reason -- p-1 across a gap boundary lands inside
+		 * the gap's zeroed interior, not the preceding real byte.
+		 */
+		if (logical_pos(g, p) > 0 && buf_char_before(g, p) != '\n')
+			p = buf_prev(g, p);
 		if (IS_AUTOINDENT(g)) {
 			len = indent_len(g, bol);
 			col = get_column(g, bol + len);
@@ -416,15 +505,47 @@ char_insert(struct editor *g, char *p, char c, int undo)
 				p--;
 				undo_pop(g);
 			}
-		} else if (p > g->text) {
+		} else if (logical_pos(g, p) > 0) {
 			char *prev = cp_prev(g, p);
-			p = text_hole_delete(g, prev, p - 1, ALLOW_UNDO_QUEUED);
+			/*
+			 * Guard is logical_pos, not a raw pointer compare, for the
+			 * same reason as the ESC handler above: p can rest at
+			 * gap_end while logically at position 0, which a physical
+			 * p > g->text compare would misread as "there's a
+			 * preceding character," letting this delete into content
+			 * before the actual start of the buffer.
+			 *
+			 * Deletion range end must be the last byte of prev's own
+			 * codepoint (cp_end(prev) - 1), not p - 1: p can legitimately
+			 * rest at gap_end (e.g. right after a delete that landed
+			 * dot there), in which case p - 1 is one byte into the
+			 * gap's zeroed interior rather than adjacent real content.
+			 */
+			if (*prev == '\n')
+				g->line_count_cache_stamp = INT_MIN;
+			p = text_hole_delete(g, prev, cp_end(g, prev) - 1,
+			                     ALLOW_UNDO_QUEUED);
 		}
 	} else {
 		if (c == ASCII_CR)
 			c = '\n';
-		if (c == '\n')
+		if (c == '\n') {
 			undo_queue_commit(g);
+			/*
+			 * Queued inserts (the common case for interactive typing)
+			 * defer bumping modified_count until the queue commits, but
+			 * total_line_count()'s cache is keyed on modified_count --
+			 * so a '\n' typed as the first byte of a fresh queue (e.g.
+			 * Enter right after entering INSERT mode) already changed
+			 * the real line count while the cached total, and anything
+			 * that reads it (the status line, screen.c's scroll clamp),
+			 * still reflects the pre-edit count until some later event
+			 * happens to commit the queue. Force the recompute now,
+			 * synchronously with the byte that actually changes the
+			 * count, independent of when the undo entry lands.
+			 */
+			g->line_count_cache_stamp = INT_MIN;
+		}
 		undo_push_insert(g, p, 1, undo);
 		p += 1 + stupid_insert(g, p, c);
 		if (IS_SHOWMATCH(g) && strchr(")]}", c) != NULL)
@@ -441,7 +562,17 @@ char_insert(struct editor *g, char *p, char c, int undo)
 					return p;
 				}
 			} else {
-				if (p != g->end - 1)
+				/*
+				 * Compare logical positions, not raw pointers: right
+				 * after the insert above, p sits at gap_start while
+				 * g->end - 1 is physically on the far side of the gap.
+				 * The two can be the same content position (this is the
+				 * buffer's last line, so p is already exactly where the
+				 * indent belongs) while being different physical
+				 * pointers, and a raw != would wrongly back p up onto
+				 * the line above instead of the fresh blank line.
+				 */
+				if (logical_pos(g, p) != logical_pos(g, g->end - 1))
 					p--;
 				col = g->newindent;
 			}
@@ -528,7 +659,6 @@ init_text_buffer(struct editor *g, char *fn)
 
 	flush_undo_data(g);
 	g->modified_count = 0;
-	g->last_modified_count = -1;
 	g->line_count_cache_stamp = INT_MIN;
 	g->refresh_last_modified_count = INT_MIN;
 	g->refresh_last_screenbegin = NULL;

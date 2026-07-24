@@ -1158,10 +1158,8 @@ colon_do_write(struct editor *g, const struct colon_state *cs)
 		status_line(g, "'%s' %uL, %uC", fn, nlines, l);
 	}
 	if (!should_write || l == size) {
-		if (should_write && q == g->text && r == g->end - 1) {
+		if (should_write && q == g->text && r == g->end - 1)
 			g->modified_count = 0;
-			g->last_modified_count = -1;
-		}
 		if (cs->cmd[1] == 'n') {
 			g->editing = 0;
 		} else if (cs->cmd[0] == 'x' || cs->cmd[1] == 'q') {

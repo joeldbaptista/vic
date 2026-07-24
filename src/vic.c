@@ -832,7 +832,6 @@ run_zz_cmd(struct editor *g, const struct cmd_ctx *ctx)
 	if (g->editing == 0 && j > 0) {
 		g->editing = 1;
 		g->modified_count = 0;
-		g->last_modified_count = -1;
 		status_line_bold(g, "%u more file(s) to edit", j);
 	}
 }
@@ -1479,8 +1478,10 @@ epilogue:
 	if (!isdigit(c))
 		g->cmdcnt = 0;
 	cnt = logical_pos(g, g->dot) - logical_pos(g, begin_line(g, g->dot));
-	/* keep dot off the newline in normal mode */
-	if (*g->dot == '\n' && cnt > 0 && g->cmd_mode == 0)
+	/* keep dot off the newline in normal mode.  dot may legitimately equal
+	 * g->end here (per the clamp above) -- one past the last byte, not
+	 * safe to dereference. */
+	if (g->dot != g->end && *g->dot == '\n' && cnt > 0 && g->cmd_mode == 0)
 		g->dot = cp_prev(g, g->dot);
 }
 

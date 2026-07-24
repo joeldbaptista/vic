@@ -212,7 +212,6 @@ init_globals(struct editor *g)
 	 * allocates the initial last_search_pattern buffer.
 	 */
 	g->session_epoch = time(NULL);
-	g->last_modified_count = -1;
 	g->tabstop = INIT_TABSTOP;
 	if (SYNTAX_COLOURING)
 		g->setops |= VI_SYNTAX;

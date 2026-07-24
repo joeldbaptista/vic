@@ -72,10 +72,17 @@ format_edit_status(struct editor *g)
 	char *buf;
 
 	cur = count_lines(g, g->text, g->dot);
-	if (g->modified_count != g->last_modified_count) {
-		g->status_tot = total_line_count(g);
-		g->last_modified_count = g->modified_count;
-	}
+	/*
+	 * total_line_count() already caches on modified_count internally and
+	 * is O(1) on a hit, so this used to gate the call on the same
+	 * modified_count check as a second cache layer -- but modified_count
+	 * lags a queued (batched-typing) insert or delete by up to one commit
+	 * cycle, and gating here on the same stale signal meant this never
+	 * even called through to pick up total_line_count's own, more
+	 * precise invalidation (forced synchronously whenever a '\n' is
+	 * involved; see char_insert). Just call it directly.
+	 */
+	g->status_tot = total_line_count(g);
 
 	if (g->status_tot > 0) {
 		percent = (100 * cur) / g->status_tot;

@@ -51,9 +51,16 @@ buf_prev(const struct editor *g, char *p)
 {
 	/*
 	 * == Retreat one byte, jumping the gap backward ==
+	 *
+	 * Clamps at g->text: p can legitimately be gap_end with gap_start
+	 * already at g->text (nothing before the gap), and unconditionally
+	 * returning p - 1 after the jump would underflow before the
+	 * allocation instead of signalling "nothing before this".
 	 */
 	if (p == g->gap_end)
 		p = g->gap_start;
+	if (p <= g->text)
+		return g->text;
 	return p - 1;
 }
 
@@ -84,9 +91,18 @@ phys_ptr(const struct editor *g, int n)
 {
 	/*
 	 * == Physical pointer corresponding to logical byte offset n ==
+	 *
+	 * gap_start and gap_end map to the same logical offset (the gap has
+	 * zero logical width), so at that exact boundary this canonically
+	 * picks gap_end -- the gap_start side is content-shaped only in that
+	 * *reading* through gap-aware helpers like buf_next steps off it
+	 * immediately; a plain dereference of a pointer left resting there
+	 * exposes the gap's zeroed interior. Every stored position that
+	 * survives a gap move (dot, screenbegin, marks, registers) is
+	 * restored via this function, so it must never hand back gap_start.
 	 */
 	int pre = (int)(g->gap_start - g->text);
-	if (n <= pre)
+	if (n < pre)
 		return g->text + n;
 	return g->text + n + (int)(g->gap_end - g->gap_start);
 }
