@@ -446,13 +446,21 @@ run_number(struct editor *g, int argc, char *argv[],
 	 * number, followed by a tab.
 	 */
 	int range_len = (int)(re - rs + 1);
-	/* max prefix "99999. " = 7 chars per line */
-	char *new_buf = malloc((size_t)range_len + range_len / 2 + 16);
-	char *p, *out;
-	int lineno = 1, new_len;
+	int nlines = 1;
+	char *scan, *new_buf, *p, *out;
+	int lineno = 1, new_len, max_plen;
 
 	(void)argc;
 	(void)argv;
+
+	for (scan = rs; scan <= re; scan++)
+		if (*scan == '\n')
+			nlines++;
+	if (*re == '\n')
+		nlines--;
+	/* exact worst-case prefix width for the largest line number used */
+	max_plen = snprintf(NULL, 0, "%d. ", nlines);
+	new_buf = malloc((size_t)range_len + (size_t)nlines * (size_t)max_plen);
 	if (!new_buf)
 		return;
 
