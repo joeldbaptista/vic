@@ -207,6 +207,7 @@ struct editor {
 	char *text, *end; /* heap slab bounds */
 	char *dot;        /* current cursor position */
 	int text_size;    /* allocated capacity */
+	int realloc_count; /* number of times text_hole_make has reallocated g->text */
 
 	/* --- Mode & command dispatch --- */
 	int editing;  /* >0 while editing a file */

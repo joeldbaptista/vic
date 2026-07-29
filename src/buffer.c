@@ -25,8 +25,8 @@ text_hole_make(struct editor *g, char *p, int size)
 	 *
 	 * Grows the backing allocation if needed (doubling up to 1 MB, then
 	 * 1 MB steps), adjusts all interior pointers (dot, screenbegin, end,
-	 * marks) by the realloc bias, and memmoves existing content to make
-	 * room.
+	 * marks, rstart, undo_queue_spos) by the realloc bias, and memmoves
+	 * existing content to make room.
 	 *
 	 * - Returns the bias (new_text - old_text); callers that hold a
 	 *   pointer into the old allocation must add this value to it.
@@ -63,7 +63,12 @@ text_hole_make(struct editor *g, char *p, int size)
 		for (i = 0; i < (int)ARRAY_SIZE(g->mark); i++)
 			if (g->mark[i])
 				g->mark[i] += bias;
+		if (g->rstart)
+			g->rstart += bias;
+		if (g->undo_queue_spos)
+			g->undo_queue_spos += bias;
 		g->text = new_text;
+		g->realloc_count++;
 	}
 	memmove(p + size, p, g->end - size - p);
 

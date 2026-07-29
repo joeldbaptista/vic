@@ -1077,6 +1077,24 @@ colon_do_version(struct editor *g, const struct colon_state *cs)
 }
 
 static void
+colon_do_metadata(struct editor *g, const struct colon_state *cs)
+{
+	/*
+	 * == :metadata — print buffer/allocation diagnostics on the status line ==
+	 *
+	 * Shows the number of times the text buffer has been reallocated, the
+	 * unused capacity remaining in the current allocation, and the name of
+	 * the file being edited.
+	 */
+	int free_space = g->text_size - (int)(g->end - g->text);
+
+	(void)cs;
+	status_line(g, "reallocs=%d free=%d bytes file=%s", g->realloc_count,
+	            free_space,
+	            g->current_filename ? g->current_filename : "No file");
+}
+
+static void
 colon_do_write(struct editor *g, const struct colon_state *cs)
 {
 	/*
@@ -1305,6 +1323,8 @@ colon_do_shell(struct editor *g, const char *cmd)
  *   set before substitute    — 'se' → set (min=2); 's' skips set → substitute
  *   read before rewind       — 'r','re' → read; 'rew' mismatches "rea" → rewind
  *   vglobal before version   — 'v' → vglobal; 've' mismatches "vg" → version
+ *   mark / metadata          — both min=2 and diverge at 'a'/'e', so 'm'
+ *                              alone matches neither; order doesn't matter
  *   write before wq/wn/x     — order within write aliases is irrelevant
  */
 struct colon_entry {
@@ -1320,7 +1340,8 @@ static const struct colon_entry colon_cmds[] = {
     {"file", 2, colon_do_file}, /* 'fi' to avoid clash with 'f'=features */
     {"global", 1, colon_do_global},
     {"list", 1, colon_do_list},
-    {"mark", 2, colon_do_mark}, /* 'ma' to avoid single-letter ambiguity */
+    {"mark", 2, colon_do_mark},         /* 'ma' to avoid single-letter ambiguity */
+    {"metadata", 2, colon_do_metadata}, /* 'me' to avoid clash with 'ma'=mark */
     {"next", 1, colon_do_quit},
     {"prev", 1, colon_do_quit},
     {"quit", 1, colon_do_quit},
