@@ -1448,7 +1448,7 @@ edit_file(struct editor *g, char *fn)
 	g->rows = 24;
 	g->columns = 80;
 	g->get_rowcol_error = query_screen_dimensions(g);
-	if (g->get_rowcol_error /* TODO? && no input on stdin */) {
+	if (g->get_rowcol_error) {
 		uint64_t k;
 		fputs(ESC "[999;999H" ESC "[6n", stdout);
 		fflush(NULL);
