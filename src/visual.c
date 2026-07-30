@@ -323,245 +323,363 @@ block_selection_ranges(struct editor *g, int *count)
 	return ranges;
 }
 
+/* ── Block-visual operator table ─────────────────────────────────────────
+ *
+ * Each handler receives the resolved per-row ranges plus the (already
+ * x/C-remapped) operator character.  'U'/'u', '>'/'<', and 'd'/'c' share one
+ * handler apiece and switch on ctx->op internally, mirroring the moves[]
+ * dispatch-table style used for key handling elsewhere in the editor.
+ */
+
+struct block_op_ctx {
+	struct editor *g;
+	struct block_range *ranges;
+	int count;
+	int op;
+};
+
+typedef void (*block_op_fn)(struct block_op_ctx *ctx);
+
+static void
+block_op_yank(struct block_op_ctx *ctx)
+{
+	struct editor *g = ctx->g;
+	size_t total = 0;
+	char *buf, *dst;
+	int i;
+
+	for (i = 0; i < ctx->count; i++)
+		total += (size_t)(ctx->ranges[i].q - ctx->ranges[i].p) + 1;
+	buf = xmalloc(total + 1);
+	dst = buf;
+	for (i = 0; i < ctx->count; i++) {
+		size_t len = (size_t)(ctx->ranges[i].q - ctx->ranges[i].p);
+		memcpy(dst, ctx->ranges[i].p, len);
+		dst += len;
+		*dst++ = '\n';
+	}
+	*dst = '\0';
+	free(g->reg[g->ydreg]);
+	g->reg[g->ydreg] = buf;
+	g->regtype[g->ydreg] = BLOCK;
+	yank_sync_out(g);
+	yank_status(g, "Yank", buf, 1);
+	reset_ydreg(g);
+}
+
+static void
+block_op_case(struct block_op_ctx *ctx)
+{
+	/* In-place, uniform byte count.  Save the full contiguous span as one
+	 * UNDO_SWAP entry so a single 'u' restores everything.  Bytes between
+	 * ranges are over-saved but restored to their unchanged values, which
+	 * is correct. */
+	struct editor *g = ctx->g;
+	char *span_start = ctx->ranges[0].p;
+	char *span_end = ctx->ranges[ctx->count - 1].q - 1;
+	char *p;
+	int i;
+
+	undo_push(g, span_start, (unsigned)(span_end - span_start + 1),
+	          UNDO_SWAP);
+	for (i = 0; i < ctx->count; i++) {
+		for (p = ctx->ranges[i].p; p < ctx->ranges[i].q; p++) {
+			unsigned char ch = (unsigned char)*p;
+			if (ch < UTF8_MULTIBYTE_MIN && isalpha(ch))
+				*p = (char)(ctx->op == 'U' ? toupper(ch) : tolower(ch));
+		}
+	}
+	g->dot = ctx->ranges[0].p;
+	reset_ydreg(g);
+}
+
+static void
+block_op_indent(struct block_op_ctx *ctx)
+{
+	/* Indent/de-indent: operate on whole lines covering the block. */
+	struct editor *g = ctx->g;
+	char *row_top = begin_line(g, ctx->ranges[0].p);
+	char *row_bot_line = begin_line(g, ctx->ranges[ctx->count - 1].p);
+	int nlines = count_lines(g, row_top, row_bot_line);
+	int allow_undo = ALLOW_UNDO;
+	char *p;
+
+	g->dot = row_top;
+	for (p = row_top; nlines > 0; nlines--, p = next_line(g, p)) {
+		if (ctx->op == '<') {
+			if (*p == '\t') {
+				text_hole_delete(g, p, p, allow_undo);
+			} else if (*p == ' ') {
+				int j;
+				for (j = 0; *p == ' ' && j < g->tabstop; j++) {
+					text_hole_delete(g, p, p, allow_undo);
+					allow_undo = ALLOW_UNDO_CHAIN;
+				}
+			}
+		} else if (p != end_line(g, p)) {
+			char_insert(g, p, '\t', allow_undo);
+		}
+		allow_undo = ALLOW_UNDO_CHAIN;
+	}
+	dot_skip_over_ws(g);
+	reset_ydreg(g);
+}
+
+static void
+block_op_delete(struct block_op_ctx *ctx)
+{
+	/* d/c (x and C are remapped to d/c by the caller before dispatch):
+	 * delete ranges bottom-to-top so earlier pointer values remain valid
+	 * through the deletions, then optionally enter INSERT mode. */
+	struct editor *g = ctx->g;
+	int allow_undo = ALLOW_UNDO;
+	int i;
+
+	for (i = ctx->count - 1; i >= 0; i--) {
+		text_hole_delete(g, ctx->ranges[i].p, ctx->ranges[i].q - 1,
+		                 allow_undo);
+		allow_undo = ALLOW_UNDO_CHAIN;
+	}
+	g->dot = ctx->ranges[0].p;
+	if (ctx->op == 'c')
+		edit_run_start_insert_cmd(g);
+	reset_ydreg(g);
+}
+
+struct block_op_entry {
+	int op;
+	block_op_fn fn;
+};
+
+static const struct block_op_entry block_op_table[] = {
+    {'y', block_op_yank},
+    {'U', block_op_case},
+    {'u', block_op_case},
+    {'>', block_op_indent},
+    {'<', block_op_indent},
+    {'d', block_op_delete},
+    {'c', block_op_delete},
+    {0, NULL},
+};
+
+/* ── Charwise/linewise operator table ───────────────────────────────────── */
+
+struct char_op_ctx {
+	struct editor *g;
+	char *start;
+	char *stop;
+	int buftype;
+	int op;
+	char *put_copy;  /* only set/used for op == 'p' */
+	char *saved_reg; /* only used for op == 'y' */
+};
+
+typedef void (*char_op_fn)(struct char_op_ctx *ctx);
+
+static void
+char_op_yank(struct char_op_ctx *ctx)
+{
+	struct editor *g = ctx->g;
+
+	text_yank(g, ctx->start, ctx->stop, g->ydreg, ctx->buftype);
+	if (g->reg[g->ydreg] != ctx->saved_reg)
+		yank_status(g, "Yank", g->reg[g->ydreg], 1);
+}
+
+static void
+char_op_put(struct char_op_ctx *ctx)
+{
+	struct editor *g = ctx->g;
+
+	g->dot = yank_delete_current(g, ctx->start, ctx->stop, ctx->buftype, 1,
+	                              ALLOW_UNDO);
+	g->dot += string_insert(g, g->dot, ctx->put_copy, ALLOW_UNDO_CHAIN);
+	free(ctx->put_copy);
+	reset_ydreg(g);
+}
+
+static void
+char_op_case(struct char_op_ctx *ctx)
+{
+	/* Save the exact original bytes as a single swap entry.  Undo restores
+	 * them with one memcpy — no memmove, no realloc. */
+	struct editor *g = ctx->g;
+	char *p;
+
+	undo_push(g, ctx->start, (unsigned)(ctx->stop - ctx->start + 1),
+	          UNDO_SWAP);
+	for (p = ctx->start; p <= ctx->stop; p++) {
+		unsigned char ch = (unsigned char)*p;
+		if (ch < UTF8_MULTIBYTE_MIN && isalpha(ch))
+			*p = (char)(ctx->op == 'U' ? toupper(ch) : tolower(ch));
+	}
+	g->dot = ctx->start;
+	reset_ydreg(g);
+}
+
+static void
+char_op_indent(struct char_op_ctx *ctx)
+{
+	struct editor *g = ctx->g;
+	char *p;
+	int allow_undo = ALLOW_UNDO;
+	int nlines = count_lines(g, ctx->start, ctx->stop);
+
+	g->dot = ctx->start;
+	for (p = begin_line(g, ctx->start); nlines > 0;
+	     nlines--, p = next_line(g, p)) {
+		if (ctx->op == '<') {
+			if (*p == '\t') {
+				text_hole_delete(g, p, p, allow_undo);
+			} else if (*p == ' ') {
+				int j;
+				for (j = 0; *p == ' ' && j < g->tabstop; j++) {
+					text_hole_delete(g, p, p, allow_undo);
+					allow_undo = ALLOW_UNDO_CHAIN;
+				}
+			}
+		} else if (p != end_line(g, p)) {
+			char_insert(g, p, '\t', allow_undo);
+		}
+		allow_undo = ALLOW_UNDO_CHAIN;
+	}
+	dot_skip_over_ws(g);
+	reset_ydreg(g);
+}
+
+static void
+char_op_delete(struct char_op_ctx *ctx)
+{
+	struct editor *g = ctx->g;
+
+	g->dot = yank_delete_current(g, ctx->start, ctx->stop, ctx->buftype, 1,
+	                              ALLOW_UNDO);
+	if (ctx->op == 'c')
+		edit_run_start_insert_cmd(g);
+	else if (ctx->buftype == WHOLE)
+		dot_skip_over_ws(g);
+	reset_ydreg(g);
+}
+
+struct char_op_entry {
+	int op;
+	char_op_fn fn;
+};
+
+static const struct char_op_entry char_op_table[] = {
+    {'y', char_op_yank},
+    {'p', char_op_put},
+    {'U', char_op_case},
+    {'u', char_op_case},
+    {'>', char_op_indent},
+    {'<', char_op_indent},
+    {'d', char_op_delete},
+    {'c', char_op_delete},
+    {0, NULL},
+};
+
 void
 visual_apply_operator(struct editor *g, int op)
 {
 	/*
 	 * == Apply an operator to the current visual selection ==
 	 *
-	 * For block mode (visual_mode == 3): resolves per-row ranges via
-	 * block_selection_ranges, dispatches on op, processes ranges
-	 * bottom-to-top so earlier pointer values remain valid through deletions.
+	 * Block mode (visual_mode == 3): resolves per-row ranges via
+	 * block_selection_ranges, then looks op up in block_op_table[].
+	 * Block-mode 'p' (put) is not yet implemented and is rejected before
+	 * the table lookup.
 	 *
-	 * For charwise/linewise: resolves the selection via visual_get_range,
-	 * then dispatches on op:
-	 *   y  — yank the selection into the register
-	 *   p  — replace selection with register contents
-	 *   U/u — uppercase/lowercase in-place (UNDO_SWAP entry for atomic undo)
-	 *   >/< — indent/de-indent each line in the selection
-	 *   x/d — delete (x is remapped to d)
-	 *   c  — delete and enter INSERT mode
-	 *   C  — cut (delete into register, no INSERT mode); +C targets SHARED_REG
+	 * Charwise/linewise: resolves the selection via visual_get_range, then
+	 * looks op up in char_op_table[].  'p' needs the register contents
+	 * fetched before visual_leave() runs, so that happens first; if the
+	 * register is empty the function returns without leaving visual mode,
+	 * matching normal-mode 'p' on an empty register.
+	 *
+	 * In both tables, x/C are remapped to d/c before lookup, and 'U'/'u',
+	 * '>'/'<', 'd'/'c' each share one handler that reads ctx->op to select
+	 * the exact behaviour — mirroring the moves[]-style dispatch used for
+	 * key handling elsewhere in the editor.
 	 *
 	 * Calls visual_leave() before mutating the buffer so that the `< and
 	 * `> marks are set correctly before any pointer adjustment.
 	 */
-	char *start;
-	char *stop;
 	char *saved_reg = g->reg[g->ydreg];
-	char *put_copy = NULL;
-	int buftype;
-	int allow_undo;
 
-	/* ── Block visual mode (visual_mode == 3) ───────────────────────────── */
 	if (g->visual_mode == 3) {
-		int count = 0;
-		struct block_range *ranges;
+		struct block_op_ctx ctx;
 		int i;
 
 		if (op == 'p') {
-			/* Block-mode paste not yet implemented. */
 			visual_leave(g);
 			indicate_error(g);
 			return;
 		}
+		if (op == 'x' || op == 'C')
+			op = 'd';
 
-		ranges = block_selection_ranges(g, &count);
+		ctx.g = g;
+		ctx.op = op;
+		ctx.ranges = block_selection_ranges(g, &ctx.count);
 		visual_leave(g);
 
-		if (ranges == NULL || count == 0) {
-			free(ranges);
+		if (ctx.ranges == NULL || ctx.count == 0) {
+			free(ctx.ranges);
 			indicate_error(g);
 			return;
 		}
 
-		if (op == 'y') {
-			size_t total = 0;
-			char *buf, *dst;
-
-			for (i = 0; i < count; i++)
-				total += (size_t)(ranges[i].q - ranges[i].p) + 1;
-			buf = xmalloc(total + 1);
-			dst = buf;
-			for (i = 0; i < count; i++) {
-				size_t len = (size_t)(ranges[i].q - ranges[i].p);
-				memcpy(dst, ranges[i].p, len);
-				dst += len;
-				*dst++ = '\n';
+		for (i = 0; block_op_table[i].fn != NULL; i++) {
+			if (block_op_table[i].op == op) {
+				block_op_table[i].fn(&ctx);
+				break;
 			}
-			*dst = '\0';
-			free(g->reg[g->ydreg]);
-			g->reg[g->ydreg] = buf;
-			g->regtype[g->ydreg] = BLOCK;
-			yank_sync_out(g);
-			yank_status(g, "Yank", buf, 1);
-			reset_ydreg(g);
-			free(ranges);
+		}
+		free(ctx.ranges);
+		return;
+	}
+
+	{
+		struct char_op_ctx ctx;
+		char *start;
+		char *stop;
+		int buftype;
+		int i;
+
+		if (!visual_get_range(g, &start, &stop, &buftype)) {
+			indicate_error(g);
 			return;
 		}
 
-		if (op == 'U' || op == 'u') {
-			/* Case-change: in-place, uniform byte count.  Save the full
-			 * contiguous span as one UNDO_SWAP entry so a single 'u'
-			 * restores everything.  Bytes between ranges are over-saved
-			 * but restored to their unchanged values, which is correct. */
-			char *span_start = ranges[0].p;
-			char *span_end = ranges[count - 1].q - 1;
-			char *p;
-
-			undo_push(g, span_start,
-			          (unsigned)(span_end - span_start + 1), UNDO_SWAP);
-			for (i = 0; i < count; i++) {
-				for (p = ranges[i].p; p < ranges[i].q; p++) {
-					unsigned char ch = (unsigned char)*p;
-					if (ch < UTF8_MULTIBYTE_MIN && isalpha(ch))
-						*p = (char)(op == 'U' ? toupper(ch) : tolower(ch));
-				}
+		ctx.put_copy = NULL;
+		if (op == 'p') {
+			if (g->ydreg == SHARED_REG)
+				shared_yank_in(g);
+			else
+				yank_sync_in(g);
+			if (g->reg[g->ydreg] == NULL) {
+				status_line_bold(g, "Nothing in register %c",
+				                 what_reg(g));
+				return;
 			}
-			g->dot = ranges[0].p;
-			reset_ydreg(g);
-			free(ranges);
-			return;
+			ctx.put_copy = xstrdup(g->reg[g->ydreg]);
 		}
-
-		if (op == '>' || op == '<') {
-			/* Indent/de-indent: operate on whole lines covering the block. */
-			char *row_top = begin_line(g, ranges[0].p);
-			char *row_bot_line = begin_line(g, ranges[count - 1].p);
-			int nlines = count_lines(g, row_top, row_bot_line);
-			char *p;
-
-			allow_undo = ALLOW_UNDO;
-			g->dot = row_top;
-			for (p = row_top; nlines > 0; nlines--, p = next_line(g, p)) {
-				if (op == '<') {
-					if (*p == '\t') {
-						text_hole_delete(g, p, p, allow_undo);
-					} else if (*p == ' ') {
-						int j;
-						for (j = 0; *p == ' ' && j < g->tabstop; j++) {
-							text_hole_delete(g, p, p, allow_undo);
-							allow_undo = ALLOW_UNDO_CHAIN;
-						}
-					}
-				} else if (p != end_line(g, p)) {
-					char_insert(g, p, '\t', allow_undo);
-				}
-				allow_undo = ALLOW_UNDO_CHAIN;
-			}
-			dot_skip_over_ws(g);
-			reset_ydreg(g);
-			free(ranges);
-			return;
-		}
-
-		/* d, x, C, c: delete ranges bottom-to-top, optionally enter insert. */
 		if (op == 'x' || op == 'C')
 			op = 'd';
 
-		allow_undo = ALLOW_UNDO;
-		for (i = count - 1; i >= 0; i--) {
-			text_hole_delete(g, ranges[i].p, ranges[i].q - 1, allow_undo);
-			allow_undo = ALLOW_UNDO_CHAIN;
-		}
-		g->dot = ranges[0].p;
-		if (op == 'c')
-			edit_run_start_insert_cmd(g);
+		ctx.g = g;
+		ctx.start = start;
+		ctx.stop = stop;
+		ctx.buftype = buftype;
+		ctx.op = op;
+		ctx.saved_reg = saved_reg;
 
-		reset_ydreg(g);
-		free(ranges);
-		return;
-	}
+		visual_leave(g);
 
-	/* ── Charwise / linewise (visual_mode 1 or 2) ───────────────────────── */
-
-	if (!visual_get_range(g, &start, &stop, &buftype)) {
-		indicate_error(g);
-		return;
-	}
-
-	if (op == 'p') {
-		if (g->ydreg == SHARED_REG)
-			shared_yank_in(g);
-		else
-			yank_sync_in(g);
-		if (g->reg[g->ydreg] == NULL) {
-			status_line_bold(g, "Nothing in register %c", what_reg(g));
-			return;
-		}
-		put_copy = xstrdup(g->reg[g->ydreg]);
-	}
-
-	visual_leave(g);
-
-	if (op == 'y') {
-		text_yank(g, start, stop, g->ydreg, buftype);
-		if (g->reg[g->ydreg] != saved_reg)
-			yank_status(g, "Yank", g->reg[g->ydreg], 1);
-		return;
-	}
-
-	if (op == 'p') {
-		g->dot = yank_delete_current(g, start, stop, buftype, 1, ALLOW_UNDO);
-		g->dot += string_insert(g, g->dot, put_copy, ALLOW_UNDO_CHAIN);
-		free(put_copy);
-		reset_ydreg(g);
-		return;
-	}
-
-	if (op == 'U' || op == 'u') {
-		char *p;
-
-		/* Save the exact original bytes as a single swap entry.
-		 * Undo restores them with one memcpy — no memmove, no realloc. */
-		undo_push(g, start, (unsigned)(stop - start + 1), UNDO_SWAP);
-
-		for (p = start; p <= stop; p++) {
-			unsigned char ch = (unsigned char)*p;
-			if (ch < UTF8_MULTIBYTE_MIN && isalpha(ch))
-				*p = (char)(op == 'U' ? toupper(ch) : tolower(ch));
-		}
-
-		g->dot = start;
-		reset_ydreg(g);
-		return;
-	}
-
-	if (op == '>' || op == '<') {
-		char *p;
-		int allow_undo2 = ALLOW_UNDO;
-		int nlines = count_lines(g, start, stop);
-
-		g->dot = start;
-		for (p = begin_line(g, start); nlines > 0; nlines--, p = next_line(g, p)) {
-			if (op == '<') {
-				if (*p == '\t') {
-					text_hole_delete(g, p, p, allow_undo2);
-				} else if (*p == ' ') {
-					int j;
-					for (j = 0; *p == ' ' && j < g->tabstop; j++) {
-						text_hole_delete(g, p, p, allow_undo2);
-						allow_undo2 = ALLOW_UNDO_CHAIN;
-					}
-				}
-			} else if (p != end_line(g, p)) {
-				char_insert(g, p, '\t', allow_undo2);
+		for (i = 0; char_op_table[i].fn != NULL; i++) {
+			if (char_op_table[i].op == op) {
+				char_op_table[i].fn(&ctx);
+				break;
 			}
-			allow_undo2 = ALLOW_UNDO_CHAIN;
 		}
-		dot_skip_over_ws(g);
-		reset_ydreg(g);
-		return;
 	}
-
-	if (op == 'x' || op == 'C')
-		op = 'd';
-
-	g->dot = yank_delete_current(g, start, stop, buftype, 1, ALLOW_UNDO);
-	if (op == 'c')
-		edit_run_start_insert_cmd(g);
-	else if (buftype == WHOLE)
-		dot_skip_over_ws(g);
-
-	reset_ydreg(g);
 }
