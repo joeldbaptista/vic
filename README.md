@@ -23,9 +23,14 @@ principles. The main difference between `vic` and the previous two iterations
 ## Build
 
 ```sh
-make          # produces ./vic
-make install  # copies to /usr/bin/vic
+cp src/config.def.h src/config.h  # first time only — config.h is gitignored
+make                               # produces ./vic
+make install                       # copies to /usr/bin/vic
 ```
+
+Startup defaults (line numbers, syntax highlighting, tabstop, cursor
+shapes, ...) live in `src/config.h`. Edit it and recompile to change them;
+`src/config.def.h` is the upstream default.
 
 Requirements: a C99 compiler, POSIX.1-2008, a Linux terminal. No external
 libraries.
