@@ -1,6 +1,5 @@
 CC=cc
 
-# BusyBox vi source assumes unsigned chars and uses a few GNU/POSIX APIs.
 CFLAGS=-std=c99 -D_POSIX_C_SOURCE=200809L -funsigned-char -Werror -Wall -Wextra -O2
 SAN_COMMON=-std=c99 -D_POSIX_C_SOURCE=200809L -funsigned-char -Wall -Wextra -O1 -g -fno-omit-frame-pointer
 
