@@ -23,14 +23,17 @@
  */
 #include "term.h"
 
+#include "config.h"
+
 #define ESC "\033"
 #define ESC_BOLD_TEXT ESC "[7m"
 #define ESC_NORM_TEXT ESC "[m"
 #define ESC_CLEAR2EOL ESC "[K"
 #define ESC_SET_CURSOR_POS ESC "[%u;%uH"
 
-static int normal_cursor_shape = CURSOR_STYLE_BLINK_BLOCK;
-static int insert_cursor_shape = CURSOR_STYLE_BLINK_PIPE;
+static int normal_cursor_shape = CFG_CURSORSHAPE;
+static int insert_cursor_shape = CFG_CURSORSHAPE_INSERT;
+static int ex_cursor_shape = CFG_CURSORSHAPE_EX;
 static int startup_cursor_shape = -1;
 static int startup_cursor_shape_initialized;
 
@@ -191,6 +194,31 @@ term_cursor_shape_get_insert(void)
 	 * == Return the currently configured Insert-mode cursor shape ==
 	 */
 	return insert_cursor_shape;
+}
+
+int
+term_cursor_shape_set_ex(int shape)
+{
+	/*
+	 * == Set the Ex-command-line cursor shape (without emitting it yet) ==
+	 *
+	 * The new shape takes effect the next time the ':' prompt is entered
+	 * (run_colon_cmd emits it via term_cursor_shape_get_ex()).  Returns -1
+	 * for out-of-range values.
+	 */
+	if (shape < CURSOR_STYLE_DEFAULT || shape > CURSOR_STYLE_PIPE)
+		return -1;
+	ex_cursor_shape = shape;
+	return 0;
+}
+
+int
+term_cursor_shape_get_ex(void)
+{
+	/*
+	 * == Return the currently configured Ex-command-line cursor shape ==
+	 */
+	return ex_cursor_shape;
 }
 
 void

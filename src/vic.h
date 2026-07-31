@@ -113,6 +113,7 @@ enum {
 #define VI_UNDOFILE (1 << 9)
 #define VI_CURSORSHAPE_INSERT (1 << 10)
 #define VI_SYNTAX (1 << 11)
+#define VI_CURSORSHAPE_EX (1 << 12)
 
 #define IS_AUTOINDENT(g) ((g)->setops & VI_AUTOINDENT)
 #define IS_EXPANDTAB(g) ((g)->setops & VI_EXPANDTAB)
@@ -147,7 +148,9 @@ enum {
 	"cshpi\0"          \
 	"cursorshapeinsert\0" \
 	"syn\0"            \
-	"syntax\0"
+	"syntax\0"         \
+	"cshpe\0"          \
+	"cursorshapeex\0"
 
 #define SET_READONLY_FILE(flags) ((flags) |= 0x01)
 #define SET_READONLY_MODE(flags) ((flags) |= 0x02)

@@ -21,7 +21,7 @@
  */
 #include "screen.h"
 #include "color.h"
-#include <regex.h>
+#include "regex.h"
 
 #include "codepoint.h"
 #include "line.h"

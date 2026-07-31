@@ -14,12 +14,10 @@
 #include "session.h"
 
 #include "buffer.h"
+#include "config.h"
 #include "ex.h"
 #include "status.h"
 #include "term.h"
-
-#define INIT_TABSTOP		8
-#define SYNTAX_COLOURING 	0
 
 void
 run_cmds(struct editor *g, char *p)
@@ -205,17 +203,24 @@ void
 init_globals(struct editor *g)
 {
 	/*
-	 * == Zero-initialise g and set safe defaults ==
+	 * == Zero-initialise g and set compile-time defaults ==
 	 *
 	 * Called once before any file is loaded.  Records the session epoch
-	 * (used for the yank temp file name), sets the default tabstop, and
-	 * allocates the initial last_search_pattern buffer.
+	 * (used for the yank temp file name), seeds tabstop and setops from
+	 * config.h, and allocates the initial last_search_pattern buffer.
 	 */
 	g->session_epoch = time(NULL);
 	g->last_modified_count = -1;
-	g->tabstop = INIT_TABSTOP;
-	if (SYNTAX_COLOURING)
-		g->setops |= VI_SYNTAX;
+	g->tabstop = CFG_TABSTOP;
+	g->setops = (CFG_AUTOINDENT ? VI_AUTOINDENT : 0) |
+	            (CFG_EXPANDTAB ? VI_EXPANDTAB : 0) |
+	            (CFG_FLASH ? VI_ERR_METHOD : 0) |
+	            (CFG_IGNORECASE ? VI_IGNORECASE : 0) |
+	            (CFG_SHOWMATCH ? VI_SHOWMATCH : 0) |
+	            (CFG_NUMBER ? VI_NUMBER : 0) |
+	            (CFG_RELATIVENUMBER ? VI_RELATIVENUMBER : 0) |
+	            (CFG_UNDOFILE ? VI_UNDOFILE : 0) |
+	            (CFG_SYNTAX ? VI_SYNTAX : 0);
 	g->newindent = -1;
 	g->line_count_cache_stamp = INT_MIN;
 	g->refresh_last_modified_count = INT_MIN;

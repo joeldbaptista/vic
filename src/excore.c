@@ -26,8 +26,9 @@ setops(struct editor *g, char *args, int flg_no)
 	 *
 	 * args is the option string (e.g. "ts=4", "noignorecase", "number").
 	 * flg_no is 1 if the "no" prefix was already stripped from args.
-	 * Integer options (tabstop, cursorshape, cursorshape_insert) require
-	 * an "=" value and reject flg_no.  Boolean options are set or cleared
+	 * Integer options (tabstop, cursorshape, cursorshape_insert,
+	 * cursorshapeex) require an "=" value and reject flg_no.  Boolean
+	 * options are set or cleared
 	 * in g->setops according to flg_no.  Unknown option names are reported
 	 * via status_line_bold.
 	 */
@@ -74,6 +75,15 @@ setops(struct editor *g, char *args, int flg_no)
 			goto bad;
 		t = (int)strtoul(eq + 1, NULL, 10);
 		if (term_cursor_shape_set_insert(t) < 0)
+			goto bad;
+		return;
+	}
+	if (index & VI_CURSORSHAPE_EX) {
+		int t;
+		if (!eq || flg_no)
+			goto bad;
+		t = (int)strtoul(eq + 1, NULL, 10);
+		if (term_cursor_shape_set_ex(t) < 0)
 			goto bad;
 		return;
 	}

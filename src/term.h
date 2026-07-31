@@ -25,6 +25,8 @@ int term_cursor_shape_set_configured(int shape);
 int term_cursor_shape_get_configured(void);
 int term_cursor_shape_set_insert(int shape);
 int term_cursor_shape_get_insert(void);
+int term_cursor_shape_set_ex(int shape);
+int term_cursor_shape_get_ex(void);
 void term_cursor_shape_update_for_mode(int cmd_mode);
 void term_cursor_shape_init_and_set(void);
 void term_cursor_shape_restore_startup(void);

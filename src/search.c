@@ -24,11 +24,11 @@
 #include "codepoint.h"
 #include "input.h"
 #include "line.h"
+#include "regex.h"
 #include "screen.h"
 #include "status.h"
 #include "term.h"
 #include "utf8.h"
-#include <regex.h>
 
 enum {
 	FORWARD = 1,

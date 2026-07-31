@@ -17,6 +17,7 @@
 #include "line.h"
 #include "motion.h"
 #include "operator.h"
+#include "regex.h"
 #include "run.h"
 #include "screen.h"
 #include "search.h"
@@ -25,7 +26,6 @@
 #include "term.h"
 #include "undo.h"
 
-#include <regex.h>
 #include <sys/wait.h>
 
 #define Isprint(c) ((unsigned char)(c) >= ' ' && (unsigned char)(c) < ASCII_DEL)
@@ -376,7 +376,6 @@ global(struct editor *g, char *p, int invert, int b, int e,
 
 	/* Compile pattern. */
 	cflags = IS_IGNORECASE(g) ? REG_ICASE : 0;
-	memset(&preg, 0, sizeof(preg));
 	if (regcomp(&preg, pat, cflags) != 0) {
 		status_line_bold(g, ":g bad pattern");
 		free(pat);
@@ -912,7 +911,7 @@ colon_do_set(struct editor *g, const struct colon_state *cs)
 		                 "%srelativenumber "
 		                 "%ssyntax "
 		                 "tabstop=%u "
-		                 "cshp=%d cshpi=%d",
+		                 "cshp=%d cshpi=%d cshpe=%d",
 		                 IS_AUTOINDENT(g) ? "" : "no",
 		                 IS_EXPANDTAB(g) ? "" : "no",
 		                 IS_ERR_METHOD(g) ? "" : "no",
@@ -921,7 +920,9 @@ colon_do_set(struct editor *g, const struct colon_state *cs)
 		                 IS_NUMBER(g) ? "" : "no",
 		                 IS_RELATIVENUMBER(g) ? "" : "no",
 		                 IS_SYNTAX(g) ? "" : "no",
-		                 g->tabstop, term_cursor_shape_get_configured());
+		                 g->tabstop, term_cursor_shape_get_configured(),
+		                 term_cursor_shape_get_insert(),
+		                 term_cursor_shape_get_ex());
 		return;
 	}
 	argp = args;
@@ -1006,7 +1007,7 @@ colon_do_substitute(struct editor *g, const struct colon_state *cs)
 
 	Rorig = R;
 	cflags = IS_IGNORECASE(g) ? REG_ICASE : 0;
-	memset(&preg, 0, sizeof(preg));
+	preg = NULL; /* so regfree() is a no-op if regcomp() below fails */
 	if (regcomp(&preg, F, cflags) != 0) {
 		status_line(g, ":s bad search pattern");
 		regfree(&preg);

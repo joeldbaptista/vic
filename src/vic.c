@@ -24,7 +24,6 @@
 #include "visual.h"
 #include "wordmotion.h"
 #include <locale.h>
-#include <regex.h>
 #include <wchar.h>
 
 /* 0x9b is Meta-ESC */
@@ -589,7 +588,10 @@ run_colon_cmd(struct editor *g, const struct cmd_ctx *ctx)
 	 * If ctx carries a pre-built command string (from a :map binding), runs
 	 * it directly.  In visual mode, leaves visual mode to set the '< '> marks,
 	 * then prompts with ":'<,'>" so s/// acts on the selection.  In normal
-	 * mode, prompts with ":".  Redraws after execution.
+	 * mode, prompts with ":".  The cursor takes the configured Ex shape
+	 * (cshpe) while the prompt is up; term_cursor_shape_update_for_mode in
+	 * the main loop restores the Normal-mode shape once colon() returns.
+	 * Redraws after execution.
 	 */
 	char *p;
 
@@ -601,9 +603,11 @@ run_colon_cmd(struct editor *g, const struct cmd_ctx *ctx)
 		/* Leave visual mode (sets '< and '> marks), then pre-fill
 		 * the address range so :s acts on the selection. */
 		visual_leave(g);
+		term_cursor_shape_set(term_cursor_shape_get_ex());
 		p = get_input_line(g, ":'<,'>");
 		colon(g, p);
 	} else {
+		term_cursor_shape_set(term_cursor_shape_get_ex());
 		p = get_input_line(g, ":");
 		colon(g, p);
 	}
@@ -1576,6 +1580,7 @@ edit_file(struct editor *g, char *fn)
 
 		if (g->cmd_mode == 0 && !g->visual_mode) {
 			int pc = c;
+			int prev_stg = g->cmd_parser.stg;
 			/* STG_STRING terminates on '\0'; remap Enter/ESC so the
 			 * real TTY stream (which never emits '\0') can terminate
 			 * search and colon commands.
@@ -1603,6 +1608,14 @@ edit_file(struct editor *g, char *fn)
 			if (!parse(&g->cmd_parser, pc)) {
 				/* show live prompt feedback for colon/search commands */
 				if (g->cmd_parser.stg == STG_STRING) {
+					/* just entered ':' — switch to the Ex cursor shape
+					 * (restored via term_cursor_shape_update_for_mode
+					 * once the command completes, since cmd_mode stays
+					 * Normal throughout). */
+					if (prev_stg != STG_STRING &&
+					    g->cmd_parser.op == ':')
+						term_cursor_shape_set(
+						    term_cursor_shape_get_ex());
 					go_bottom_and_clear_to_eol(g);
 					putchar(g->cmd_parser.op);
 					fputs(g->cmd_parser.b, stdout);
