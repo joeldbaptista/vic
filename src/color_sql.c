@@ -8,25 +8,16 @@
  *   Block comments  (slash-star ... star-slash), spanning lines
  *   String literals '...' (standard) and "..." (quoted identifiers)
  *
- * Cross-line state:
- *   SQL_NORMAL         - ordinary code
- *   SQL_BLOCK_CMT      - inside a block comment
- *   SQL_BLOCK_CMT_STAR - inside a block comment, last byte was '*'
+ * Scanning is done by the generic engine in color_generic.c; see
+ * color_generic.h for the cross-line state encoding.
  */
 #include "color.h"
-#include <ctype.h>
+#include "color_generic.h"
 #include <stddef.h>
-#include <string.h>
-
-enum {
-	SQL_NORMAL = 0,
-	SQL_BLOCK_CMT = 1,
-	SQL_BLOCK_CMT_STAR = 2,
-};
 
 /*
  * SQL is case-insensitive so keywords are stored lower-case and matched
- * after folding the source token to lower-case.
+ * after folding the source token to lower-case (lang_spec.keywords_ci).
  */
 static const char *const sql_keywords[] = {
     "abort",
@@ -172,224 +163,35 @@ static const char *const sql_keywords[] = {
     NULL,
 };
 
-static int
-sql_is_keyword(const char *s, int len)
-{
-	/*
-	 * == Case-insensitive check if [s, s+len) is an SQL keyword ==
-	 *
-	 * Lowercases the token into a local buffer and does a linear scan
-	 * through sql_keywords.  Returns 1 on match, 0 otherwise.
-	 */
-	char buf[32];
-	int i;
+/*
+ * '...' (standard literal) and "..." (quoted identifier) both use ''/""
+ * doubling to escape an embedded quote; `...` (MySQL quoted identifier)
+ * has no escape mechanism.  None of the three span lines.
+ */
+static const struct str_spec sql_strings[] = {
+    {.open = '\'', .doubled_escape = 1},
+    {.open = '"', .doubled_escape = 1},
+    {.open = '`'},
+    {0},
+};
 
-	if (len >= (int)sizeof(buf))
-		return 0;
-	for (i = 0; i < len; i++)
-		buf[i] = (char)tolower((unsigned char)s[i]);
-	buf[len] = '\0';
-	for (i = 0; sql_keywords[i]; i++) {
-		if ((int)strlen(sql_keywords[i]) == len &&
-		    memcmp(sql_keywords[i], buf, (size_t)len) == 0)
-			return 1;
-	}
-	return 0;
-}
-
-static int
-is_ident_start(unsigned char c)
-{
-	/*
-	 * == True if c can start an SQL identifier ==
-	 */
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
-}
-
-static int
-is_ident(unsigned char c)
-{
-	/*
-	 * == True if c can continue an SQL identifier ==
-	 */
-	return is_ident_start(c) || (c >= '0' && c <= '9');
-}
-
-static void
-fill_attrs(char *attrs, int from, int to, char attr)
-{
-	/*
-	 * == Fill attrs[from..to-1] with the given ATTR_* value ==
-	 */
-	int i;
-
-	for (i = from; i < to; i++)
-		attrs[i] = attr;
-}
+static const struct lang_spec sql_spec = {
+    .keywords = sql_keywords,
+    .keywords_ci = 1,
+    .line_comment = "--",
+    .block_open = "/*",
+    .block_close = "*/",
+    .strings = sql_strings,
+    .num = {.hex = 1},
+};
 
 static int
 sql_colorize(int state, const char *line, int len, char *attrs)
 {
 	/*
-	 * == Colorize one line of SQL and return the new cross-line state ==
-	 *
-	 * Recognises SQL keywords (case-insensitive), -- line comments,
-	 * block comments (slash-star), single-quoted string literals, and
-	 * numeric literals.  Cross-line state tracks open block comments.
+	 * == Colorize one line of SQL ==
 	 */
-	int i = 0;
-
-#define SET(from, to, a)                                      \
-	do {                                                  \
-		if (attrs)                                    \
-			fill_attrs(attrs, (from), (to), (a)); \
-	} while (0)
-
-	if (attrs)
-		fill_attrs(attrs, 0, len, ATTR_NORMAL);
-
-	/* Resume block comment from previous line. */
-	if (state == SQL_BLOCK_CMT || state == SQL_BLOCK_CMT_STAR) {
-		while (i < len) {
-			if (state == SQL_BLOCK_CMT_STAR && line[i] == '/') {
-				SET(i, i + 1, ATTR_COMMENT);
-				i++;
-				state = SQL_NORMAL;
-				goto normal;
-			}
-			state = (line[i] == '*') ? SQL_BLOCK_CMT_STAR : SQL_BLOCK_CMT;
-			SET(i, i + 1, ATTR_COMMENT);
-			i++;
-		}
-		return state;
-	}
-
-normal:
-	while (i < len) {
-		unsigned char c = (unsigned char)line[i];
-
-		/* Line comment: -- */
-		if (c == '-' && i + 1 < len && line[i + 1] == '-') {
-			SET(i, len, ATTR_COMMENT);
-			goto done;
-		}
-
-		/* Block comment: / * ... */
-		if (c == '/' && i + 1 < len && line[i + 1] == '*') {
-			int start = i;
-			i += 2;
-			state = SQL_BLOCK_CMT;
-			while (i < len) {
-				if (state == SQL_BLOCK_CMT_STAR && line[i] == '/') {
-					i++;
-					state = SQL_NORMAL;
-					break;
-				}
-				state =
-				    (line[i] == '*') ? SQL_BLOCK_CMT_STAR : SQL_BLOCK_CMT;
-				i++;
-			}
-			SET(start, i, ATTR_COMMENT);
-			if (state != SQL_NORMAL)
-				goto done;
-			continue;
-		}
-
-		/* Single-quoted string literal. */
-		if (c == '\'') {
-			int start = i++;
-			while (i < len) {
-				/* '' is an escaped quote inside a string */
-				if (line[i] == '\'' && i + 1 < len &&
-				    line[i + 1] == '\'') {
-					i += 2;
-					continue;
-				}
-				if (line[i] == '\'') {
-					i++;
-					break;
-				}
-				i++;
-			}
-			SET(start, i, ATTR_STRING);
-			continue;
-		}
-
-		/* Double-quoted identifier. */
-		if (c == '"') {
-			int start = i++;
-			while (i < len) {
-				if (line[i] == '"' && i + 1 < len &&
-				    line[i + 1] == '"') {
-					i += 2;
-					continue;
-				}
-				if (line[i] == '"') {
-					i++;
-					break;
-				}
-				i++;
-			}
-			SET(start, i, ATTR_STRING);
-			continue;
-		}
-
-		/* Backtick-quoted identifier (MySQL). */
-		if (c == '`') {
-			int start = i++;
-			while (i < len && line[i] != '`')
-				i++;
-			if (i < len)
-				i++;
-			SET(start, i, ATTR_STRING);
-			continue;
-		}
-
-		/* Number: hex or decimal/float. */
-		if (c >= '0' && c <= '9') {
-			int start = i;
-			if (c == '0' && i + 1 < len &&
-			    (line[i + 1] == 'x' || line[i + 1] == 'X')) {
-				i += 2;
-				while (i < len && isxdigit((unsigned char)line[i]))
-					i++;
-			} else {
-				while (i < len && isdigit((unsigned char)line[i]))
-					i++;
-				if (i < len && line[i] == '.') {
-					i++;
-					while (i < len && isdigit((unsigned char)line[i]))
-						i++;
-				}
-				if (i < len && (line[i] == 'e' || line[i] == 'E')) {
-					i++;
-					if (i < len &&
-					    (line[i] == '+' || line[i] == '-'))
-						i++;
-					while (i < len && isdigit((unsigned char)line[i]))
-						i++;
-				}
-			}
-			SET(start, i, ATTR_NUMBER);
-			continue;
-		}
-
-		/* Keyword or identifier. */
-		if (is_ident_start(c)) {
-			int start = i;
-			while (i < len && is_ident((unsigned char)line[i]))
-				i++;
-			if (sql_is_keyword(line + start, i - start))
-				SET(start, i, ATTR_KEYWORD);
-			continue;
-		}
-
-		i++;
-	}
-
-done:
-	return state;
-#undef SET
+	return colorize_generic(state, line, len, attrs, &sql_spec);
 }
 
 static const char *const sql_extensions[] = {".sql", NULL};

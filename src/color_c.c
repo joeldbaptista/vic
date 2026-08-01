@@ -2,8 +2,9 @@
  * color_c.c - syntax colorizer for C and C++.
  *
  * Two colorizers are exported: colorizer_c (.c/.h) and colorizer_cpp
- * (.cc/.cpp/.cxx/.hpp/...).  They share one implementation; the only
- * difference is the keyword table.
+ * (.cc/.cpp/.cxx/.hpp/...).  They share one struct lang_spec; the only
+ * difference is the keyword table.  Scanning itself is done by the
+ * generic engine in color_generic.c.
  *
  * Recognised tokens:
  *   Keywords      — language-specific tables below
@@ -14,23 +15,13 @@
  *   String literals "..."
  *   Character literals '...'
  *
- * Cross-line state:
- *   CS_NORMAL         - ordinary code / start of file
- *   CS_BLOCK_CMT      - inside a block comment
- *   CS_BLOCK_CMT_STAR - inside a block comment, last byte was '*'
- *   CS_PREPROC_CONT   - preprocessor line continuation (trailing '\')
+ * Cross-line state: see color_generic.h.  '#' lines use CS_BOL_CONT for
+ * a trailing-backslash continuation; block comments use CS_BLOCK_CMT /
+ * CS_BLOCK_CMT_STAR.
  */
 #include "color.h"
-#include <ctype.h>
+#include "color_generic.h"
 #include <stddef.h>
-#include <string.h>
-
-enum {
-	CS_NORMAL = 0,
-	CS_BLOCK_CMT = 1,
-	CS_BLOCK_CMT_STAR = 2,
-	CS_PREPROC_CONT = 3,
-};
 
 /* C89/C99/C11 reserved keywords plus common macros (sorted). */
 static const char *const c_keywords[] = {
@@ -182,267 +173,51 @@ static const char *const cpp_keywords[] = {
     NULL,
 };
 
-static int
-is_keyword(const char *s, int len, const char *const *kw)
-{
-	/*
-	 * == Check if the token [s, s+len) is in the keyword table kw ==
-	 *
-	 * Linear scan through the NULL-terminated kw array.  Returns 1 on
-	 * match, 0 otherwise.
-	 */
-	int i;
+/* "..." and '...' — both backslash-escaped, neither spans lines. */
+static const struct str_spec c_strings[] = {
+    {.open = '"', .escape = 1},
+    {.open = '\'', .escape = 1},
+    {0},
+};
 
-	for (i = 0; kw[i]; i++) {
-		if ((int)strlen(kw[i]) == len &&
-		    memcmp(kw[i], s, (size_t)len) == 0)
-			return 1;
-	}
-	return 0;
-}
+static const struct lang_spec c_spec = {
+    .keywords = c_keywords,
+    .line_comment = "//",
+    .block_open = "/*",
+    .block_close = "*/",
+    .strings = c_strings,
+    .num = {.hex = 1, .int_suffixes = "uUlLfF"},
+    .bol_char = '#',
+    .bol_continuation = 1,
+};
 
-static int
-is_ident_start(unsigned char c)
-{
-	/*
-	 * == True if c can start a C/C++ identifier ==
-	 */
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
-}
-
-static int
-is_ident(unsigned char c)
-{
-	/*
-	 * == True if c can continue a C/C++ identifier (letter, digit, or _) ==
-	 */
-	return is_ident_start(c) || (c >= '0' && c <= '9');
-}
-
-static void
-fill_attrs(char *attrs, int from, int to, char attr)
-{
-	/*
-	 * == Fill attrs[from..to-1] with the given ATTR_* value ==
-	 *
-	 * No-op when attrs is NULL (used for pre-scan passes that only need
-	 * the returned state).
-	 */
-	int i;
-
-	for (i = from; i < to; i++)
-		attrs[i] = attr;
-}
-
-static int
-colorize_impl(int state, const char *line, int len, char *attrs,
-              const char *const *kw)
-{
-	/*
-	 * == Colorize one line of C/C++ source and return the new cross-line state ==
-	 *
-	 * Applies syntax highlighting for a single line [line, line+len) using
-	 * the given keyword table kw.  Fills attrs[] with ATTR_* values for each
-	 * byte.  If attrs is NULL, only the returned state value is meaningful
-	 * (used for pre-scan by screen.c to seed color_state at screenbegin).
-	 *
-	 * Cross-line state:
-	 *   CS_NORMAL           — start of line in normal mode
-	 *   CS_BLOCK_CMT        — inside a block comment (slash-star)
-	 *   CS_BLOCK_CMT_STAR   — inside block comment, last byte was '*'
-	 *   CS_PREPROC_CONT     — preprocessor continuation (trailing '\')
-	 */
-	int i = 0;
-	int new_state = CS_NORMAL;
-
-#define SET(from, to, a)                                      \
-	do {                                                  \
-		if (attrs)                                    \
-			fill_attrs(attrs, (from), (to), (a)); \
-	} while (0)
-
-	if (attrs)
-		fill_attrs(attrs, 0, len, ATTR_NORMAL);
-
-	if (state == CS_BLOCK_CMT || state == CS_BLOCK_CMT_STAR) {
-		while (i < len) {
-			if (state == CS_BLOCK_CMT_STAR && line[i] == '/') {
-				SET(i, i + 1, ATTR_COMMENT);
-				i++;
-				state = CS_NORMAL;
-				goto normal;
-			}
-			state = (line[i] == '*') ? CS_BLOCK_CMT_STAR : CS_BLOCK_CMT;
-			SET(i, i + 1, ATTR_COMMENT);
-			i++;
-		}
-		new_state = state;
-		goto done;
-	}
-
-	if (state == CS_PREPROC_CONT) {
-		new_state =
-		    (len > 0 && line[len - 1] == '\\') ? CS_PREPROC_CONT : CS_NORMAL;
-		SET(0, len, ATTR_PREPROC);
-		goto done;
-	}
-
-normal:
-	while (i < len) {
-		unsigned char c = (unsigned char)line[i];
-
-		if (c == '#') {
-			int bol = 1, j;
-			for (j = 0; j < i; j++) {
-				if (line[j] != ' ' && line[j] != '\t') {
-					bol = 0;
-					break;
-				}
-			}
-			if (bol) {
-				new_state = (len > 0 && line[len - 1] == '\\')
-				                ? CS_PREPROC_CONT
-				                : CS_NORMAL;
-				SET(i, len, ATTR_PREPROC);
-				goto done;
-			}
-		}
-
-		if (c == '/' && i + 1 < len && line[i + 1] == '*') {
-			int start = i;
-			i += 2;
-			state = CS_BLOCK_CMT;
-			while (i < len) {
-				if (state == CS_BLOCK_CMT_STAR && line[i] == '/') {
-					i++;
-					state = CS_NORMAL;
-					break;
-				}
-				state = (line[i] == '*') ? CS_BLOCK_CMT_STAR : CS_BLOCK_CMT;
-				i++;
-			}
-			SET(start, i, ATTR_COMMENT);
-			if (state != CS_NORMAL) {
-				new_state = state;
-				goto done;
-			}
-			continue;
-		}
-
-		if (c == '/' && i + 1 < len && line[i + 1] == '/') {
-			SET(i, len, ATTR_COMMENT);
-			goto done;
-		}
-
-		if (c == '"') {
-			int start = i++;
-			while (i < len) {
-				if (line[i] == '\\') {
-					i += 2;
-					continue;
-				}
-				if (line[i] == '"') {
-					i++;
-					break;
-				}
-				i++;
-			}
-			SET(start, i, ATTR_STRING);
-			continue;
-		}
-
-		if (c == '\'') {
-			int start = i++;
-			while (i < len) {
-				if (line[i] == '\\') {
-					i += 2;
-					continue;
-				}
-				if (line[i] == '\'') {
-					i++;
-					break;
-				}
-				i++;
-			}
-			SET(start, i, ATTR_STRING);
-			continue;
-		}
-
-		/* Number literal: decimal, hex (0x/0X), float with exponent/suffix. */
-		if (c >= '0' && c <= '9') {
-			int start = i;
-			if (c == '0' && i + 1 < len &&
-			    (line[i + 1] == 'x' || line[i + 1] == 'X')) {
-				i += 2;
-				while (i < len && isxdigit((unsigned char)line[i]))
-					i++;
-			} else {
-				while (i < len && isdigit((unsigned char)line[i]))
-					i++;
-				if (i < len && line[i] == '.') {
-					i++;
-					while (i < len && isdigit((unsigned char)line[i]))
-						i++;
-				}
-				if (i < len && (line[i] == 'e' || line[i] == 'E')) {
-					i++;
-					if (i < len &&
-					    (line[i] == '+' || line[i] == '-'))
-						i++;
-					while (i < len && isdigit((unsigned char)line[i]))
-						i++;
-				}
-			}
-			/* integer/float suffix: u U l L f F and combinations */
-			while (i < len) {
-				unsigned char s = (unsigned char)line[i];
-				if (s == 'u' || s == 'U' || s == 'l' || s == 'L' ||
-				    s == 'f' || s == 'F')
-					i++;
-				else
-					break;
-			}
-			SET(start, i, ATTR_NUMBER);
-			continue;
-		}
-
-		if (is_ident_start(c)) {
-			int start = i;
-			while (i < len && is_ident((unsigned char)line[i]))
-				i++;
-			if (is_keyword(line + start, i - start, kw))
-				SET(start, i, ATTR_KEYWORD);
-			continue;
-		}
-
-		i++;
-	}
-
-done:
-	return new_state;
-#undef SET
-}
+static const struct lang_spec cpp_spec = {
+    .keywords = cpp_keywords,
+    .line_comment = "//",
+    .block_open = "/*",
+    .block_close = "*/",
+    .strings = c_strings,
+    .num = {.hex = 1, .int_suffixes = "uUlLfF"},
+    .bol_char = '#',
+    .bol_continuation = 1,
+};
 
 static int
 c_colorize(int state, const char *line, int len, char *attrs)
 {
 	/*
-	 * == Colorize one line of C source using the C keyword table ==
-	 *
-	 * Thin wrapper around colorize_impl for the C colorizer entry point.
+	 * == Colorize one line of C source ==
 	 */
-	return colorize_impl(state, line, len, attrs, c_keywords);
+	return colorize_generic(state, line, len, attrs, &c_spec);
 }
 
 static int
 cpp_colorize(int state, const char *line, int len, char *attrs)
 {
 	/*
-	 * == Colorize one line of C++ source using the C++ keyword table ==
-	 *
-	 * Thin wrapper around colorize_impl for the C++ colorizer entry point.
+	 * == Colorize one line of C++ source ==
 	 */
-	return colorize_impl(state, line, len, attrs, cpp_keywords);
+	return colorize_generic(state, line, len, attrs, &cpp_spec);
 }
 
 static const char *const c_extensions[] = {".c", ".h", NULL};
