@@ -1,0 +1,7 @@
+apple
+banana
+cherry
+apricot
+apRicot
+date
+avocado
