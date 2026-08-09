@@ -342,6 +342,7 @@ void show_usage(void);
 void *xmalloc(size_t size);
 void *xzalloc(size_t size);
 void *xrealloc(void *ptr, size_t size);
+size_t grow_cap(size_t cap, size_t need, size_t min);
 char *xstrdup(const char *s);
 char *xstrndup(const char *s, size_t n);
 ssize_t safe_read(int fd, void *buf, size_t count);

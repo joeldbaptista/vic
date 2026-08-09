@@ -403,7 +403,7 @@ global(struct editor *g, char *p, int invert, int b, int e,
 
 		if (matched != invert) {
 			if (nmatches == cap) {
-				cap *= 2;
+				cap = (int)grow_cap((size_t)cap, (size_t)nmatches + 1, 64);
 				offsets = xrealloc(offsets, (size_t)cap * sizeof(int));
 			}
 			offsets[nmatches++] = (int)(line - g->text);
@@ -769,7 +769,7 @@ colon_do_read_cmd(struct editor *g, int e, unsigned got, const char *cmd)
 		ssize_t n;
 		while ((n = read(pipefd[0], tmp, sizeof(tmp))) > 0) {
 			if (len + (size_t)n + 2 > cap) {
-				cap = cap * 2 + (size_t)n;
+				cap = grow_cap(cap, len + (size_t)n + 2, cap);
 				buf = xrealloc(buf, cap);
 			}
 			memcpy(buf + len, tmp, (size_t)n);

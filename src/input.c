@@ -312,7 +312,7 @@ queue_bracketed_paste(struct editor *g)
 				truncated = 1;
 				continue;
 			}
-			cap *= 2;
+			cap = grow_cap(cap, len + 2, cap);
 			paste = xrealloc(paste, cap);
 		}
 

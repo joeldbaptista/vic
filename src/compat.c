@@ -3,6 +3,7 @@
  *
  *   - abort-on-OOM wrappers: xmalloc, xzalloc, xrealloc, xstrdup, xstrndup,
  *     xasprintf
+ *   - dynamic array growth: grow_cap
  *   - POSIX I/O helpers: safe_read, full_read, full_write, safe_poll
  *   - Terminal helpers: get_terminal_width_height, set_termios_to_raw,
  *     tcsetattr_stdin_TCSANOW
@@ -77,6 +78,27 @@ xrealloc(void *ptr, size_t size)
 		exit(1);
 	}
 	return p;
+}
+
+size_t
+grow_cap(size_t cap, size_t need, size_t min)
+{
+	/*
+	 * == Compute a doubled capacity that can hold at least 'need' units ==
+	 *
+	 * Does not allocate; caller reallocs to the returned capacity times
+	 * its element size.
+	 * Parameters:
+	 *   cap  — current capacity, in elements or bytes
+	 *   need — minimum capacity required after growth
+	 *   min  — starting capacity to use when cap is 0
+	 * Returns: new capacity >= need
+	 */
+	if (cap == 0)
+		cap = min;
+	while (cap < need)
+		cap *= 2;
+	return cap;
 }
 
 char *
@@ -328,7 +350,7 @@ xmalloc_open_read_close(const char *filename, size_t *sizep)
 			break;
 		len += (size_t)r;
 		if (len == cap) {
-			cap = cap ? (cap * 2) : 1024;
+			cap = grow_cap(cap, len + 1, 1024);
 			buf = xrealloc(buf, cap + 1);
 		}
 	}
