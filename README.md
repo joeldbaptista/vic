@@ -98,6 +98,22 @@ with `'a`–`'z` jump motions.
 | `:g/pat/cmd` `:v/pat/cmd` | global and inverse-global |
 | `:set option` | toggle or assign an option |
 
+#### `:g`/`:v` commands
+
+`cmd` is run via the same ex dispatcher as any `:` command, so it accepts
+any entry from the table above (and `:g`/`:v` themselves, nested). The
+useful ones for per-line use:
+
+| `cmd` | Effect on each matching line |
+|-------|-------------------------------|
+| `d` | delete the line |
+| `s/pat/repl/flags` | substitute within the line |
+| `y` | yank the line (overwrites the register each time) |
+| `l` | list/display the line |
+
+Others (`w`, `q`, `e`, `set`, `run`, ...) are file/session-level and just
+re-run once per match rather than acting on the line.
+
 ### Options
 
 | Option | Short | Default | Description |
