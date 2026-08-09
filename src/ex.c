@@ -391,17 +391,15 @@ global(struct editor *g, char *p, int invert, int b, int e,
 
 	line = find_line(g, gstart);
 	for (gi = gstart; gi <= gend && line < g->end; gi++) {
-		char *eol = end_line(g, line);
+		char *eol, sv;
 		regmatch_t m;
 		int matched;
 
-		{
-			char sv = *eol;
-
-			*eol = '\0';
-			matched = (regexec(&preg, line, 1, &m, 0) == 0);
-			*eol = sv;
-		}
+		eol = end_line(g, line);
+		sv = *eol;
+		*eol = '\0';
+		matched = (regexec(&preg, line, 1, &m, 0) == 0);
+		*eol = sv;
 
 		if (matched != invert) {
 			if (nmatches == cap) {
