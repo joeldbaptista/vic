@@ -72,4 +72,4 @@ sh_colorize(int state, const char *line, int len, char *attrs)
 static const char *const sh_extensions[] = {
     ".sh", ".bash", ".zsh", ".ksh", NULL};
 
-const struct colorizer colorizer_sh = {"sh", sh_extensions, sh_colorize};
+const struct colorizer colorizer_sh = {"sh", sh_extensions, sh_colorize, 4};

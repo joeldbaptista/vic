@@ -44,6 +44,7 @@ struct colorizer {
 	const char *const
 	    *extensions; /* NULL-terminated list, e.g. {".c",".h",NULL} */
 	colorize_fn colorize;
+	int tabstop; /* 0 = use global default */
 };
 
 /*

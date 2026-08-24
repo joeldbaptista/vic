@@ -196,4 +196,4 @@ sql_colorize(int state, const char *line, int len, char *attrs)
 
 static const char *const sql_extensions[] = {".sql", NULL};
 
-const struct colorizer colorizer_sql = {"sql", sql_extensions, sql_colorize};
+const struct colorizer colorizer_sql = {"sql", sql_extensions, sql_colorize, 4};

@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include "vic.h"
 #include "buffer.h"
+#include "color.h"
 #include "codepoint.h"
 #include "context.h"
 #include "editcmd.h"
@@ -1474,6 +1475,14 @@ edit_file(struct editor *g, char *fn)
 	g->mark[MARK_CONTEXT] = g->mark[MARK_PREV_CONTEXT] = g->text;
 	g->crow = 0;
 	g->ccol = 0;
+
+	/* Set file specific attributes */
+	{
+		const struct colorizer *cz = colorizer_find(fn);
+		if (cz && cz->tabstop)
+			g->tabstop = cz->tabstop;
+	}
+	
 
 	signal(SIGWINCH, winch_handler);
 	signal(SIGTSTP, tstp_handler);

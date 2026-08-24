@@ -88,4 +88,4 @@ py_colorize(int state, const char *line, int len, char *attrs)
 
 static const char *const py_extensions[] = {".py", ".pyw", NULL};
 
-const struct colorizer colorizer_py = {"py", py_extensions, py_colorize};
+const struct colorizer colorizer_py = {"py", py_extensions, py_colorize, 4};
