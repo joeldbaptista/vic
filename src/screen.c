@@ -38,8 +38,17 @@
 /*
  * SGR escape sequences for each (in_visual, attr) state combination.
  * Every entry is a complete self-contained SGR sequence.
- * COMMENT = cyan (36), STRING = yellow (33), PREPROC = magenta (35),
- * KEYWORD = bold (1), NUMBER = green (32).
+ * COMMENT = dim white (2;37), STRING = red (31), PREPROC = dim yellow
+ * (2;33), KEYWORD = bold+dim magenta (1;2;35), NUMBER = blue (34).  Chosen
+ * as the nearest basic-ANSI match to each group's color in the xcodelight
+ * vim colorscheme (~/.vim/colors/xcodelight.vim): Comment #8a99a6 (grey —
+ * one shade darker than plain white, hence dim), String #d12f1b, PreProc
+ * #78492a (brown — dim/faint yellow renders as a muted olive-brown on most
+ * terminals, unlike full-intensity yellow), Statement #ad3da4 (bold, but a
+ * muted plum rather than a loud bold magenta — dim tones down the color
+ * while bold keeps the heavier weight), Number #272ad8.  Note SGR 1 and 2
+ * are both "intensity" attributes; some older terminals let bold win and
+ * ignore the dim, which just falls back to plain bold magenta.
  *
  * Visual selection uses plain reverse video (\033[7m) for all syntax
  * attribute types.  Combining reverse with a syntax color (e.g. \033[7;35m)
@@ -49,7 +58,7 @@
  */
 static const char *const sgr_table[2][ATTR_COUNT] = {
     /* not in visual selection */
-    {"\033[m", "\033[36m", "\033[33m", "\033[35m", "\033[1m", "\033[32m"},
+    {"\033[m", "\033[2;37m", "\033[31m", "\033[2;33m", "\033[1;2;35m", "\033[34m"},
     /* inside visual selection — plain reverse video overrides syntax color */
     {"\033[7m", "\033[7m", "\033[7m", "\033[7m", "\033[7m", "\033[7m"},
 };
