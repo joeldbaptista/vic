@@ -441,6 +441,44 @@ string_insert(struct editor *g, char *p, const char *s, int undo)
 	return bias;
 }
 
+void
+buffer_replace_range(struct editor *g, char *rs, char *re,
+                      const char *new_buf, int new_len)
+{
+	/*
+	 * == Replace the text [rs, re] (inclusive) with new_buf[0..new_len-1] ==
+	 *
+	 * Deletes the old range via text_hole_delete, then inserts the new
+	 * content via string_insert, chaining both into one undo unit.  If
+	 * new_len is 0, only the deletion is performed.
+	 *
+	 * If [rs, re] spans through the buffer's sentinel byte (re == end-1)
+	 * and new_buf also ends in '\n', leave that one byte physically
+	 * undisturbed rather than deleting and reinserting it: undo_push()
+	 * (undo.c) silently trims one byte off a DEL record that spans the
+	 * whole live buffer, which would otherwise lose the final '\n' on
+	 * undo.  Deleting/inserting one byte short is content-equivalent
+	 * since both old and new content end in '\n' there.
+	 */
+	char *tmp;
+
+	if (re == g->end - 1 && new_len > 0 && new_buf[new_len - 1] == '\n') {
+		re--;
+		new_len--;
+	}
+	if (rs <= re)
+		text_hole_delete(g, rs, re, ALLOW_UNDO);
+	if (new_len <= 0)
+		return;
+	tmp = malloc((size_t)new_len + 1);
+	if (!tmp)
+		return;
+	memcpy(tmp, new_buf, (size_t)new_len);
+	tmp[new_len] = '\0';
+	string_insert(g, rs, tmp, ALLOW_UNDO_CHAIN);
+	free(tmp);
+}
+
 int
 file_write(struct editor *g, char *fn, char *first, char *last)
 {

@@ -1074,6 +1074,7 @@ static const struct cmd_entry cmd_table[] = {
     {'Y', NULL, operator_run_change_delete_yank_cmd},
     {'<', NULL, do_shift},
     {'>', NULL, do_shift},
+    {'!', NULL, operator_run_filter_cmd},
     {':', NULL, run_colon_cmd},
     {'m', NULL, run_set_mark_cmd},
     {'Z', NULL, run_zz_cmd},
@@ -1271,7 +1272,7 @@ handle_visual_key(struct editor *g, int c, const struct cmd_ctx *ctx,
 		}
 		return;
 	}
-	if (in_set(c, "dcyxpUuC<>")) {
+	if (in_set(c, "dcyxpUuC<>!")) {
 		visual_apply_operator(g, c);
 		return;
 	}

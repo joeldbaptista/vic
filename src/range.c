@@ -91,7 +91,7 @@ range_find(struct editor *g, char **start, char **stop, const struct cmd_ctx *ct
 		return -1;
 	}
 
-	if ((cmd == 'Y' || cmd == c) && strchr("cdy><", c)) {
+	if ((cmd == 'Y' || cmd == c) && strchr("cdy><!", c)) {
 		buftype = WHOLE;
 		if (--g->cmdcnt > 0) {
 			do_cmd(g, 'j', NULL);

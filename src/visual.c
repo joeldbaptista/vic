@@ -22,10 +22,13 @@
 #include "buffer.h"
 #include "codepoint.h"
 #include "editcmd.h"
+#include "ex.h"
 #include "line.h"
 #include "motion.h"
 #include "operator.h"
+#include "search.h"
 #include "status.h"
+#include "term.h"
 
 void
 visual_block_insert_replay(struct editor *g)
@@ -561,6 +564,25 @@ char_op_delete(struct char_op_ctx *ctx)
 	reset_ydreg(g);
 }
 
+static void
+char_op_filter(struct char_op_ctx *ctx)
+{
+	/*
+	 * == ! — filter the visual selection through a shell command ==
+	 *
+	 * visual_apply_operator() has already called visual_leave(), which
+	 * sets the '< '> marks from the selection, so this only needs to
+	 * prompt for the command and hand it to colon(), matching how ':'
+	 * prompts with ":'<,'>" in visual mode (run_colon_cmd, vic.c).
+	 */
+	struct editor *g = ctx->g;
+	char *line;
+
+	term_cursor_shape_set(term_cursor_shape_get_ex());
+	line = get_input_line(g, ":'<,'>!");
+	colon(g, line);
+}
+
 struct char_op_entry {
 	int op;
 	char_op_fn fn;
@@ -575,6 +597,7 @@ static const struct char_op_entry char_op_table[] = {
     {'<', char_op_indent},
     {'d', char_op_delete},
     {'c', char_op_delete},
+    {'!', char_op_filter},
     {0, NULL},
 };
 

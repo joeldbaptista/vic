@@ -11,6 +11,8 @@ void init_filename(struct editor *g, char *fn);
 void update_filename(struct editor *g, char *fn);
 int init_text_buffer(struct editor *g, char *fn);
 uintptr_t string_insert(struct editor *g, char *p, const char *s, int undo);
+void buffer_replace_range(struct editor *g, char *rs, char *re,
+                           const char *new_buf, int new_len);
 int file_write(struct editor *g, char *fn, char *first, char *last);
 
 #endif

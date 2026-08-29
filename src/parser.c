@@ -169,7 +169,7 @@ parse(struct parser *s, int c)
 				s->ok = 1;
 				return 1;
 			}
-			if (in_set(c, "dyc<>")) { /* need range */
+			if (in_set(c, "dyc<>!")) { /* need range */
 				s->op = (char)c;
 				s->stg = STG_RANGE_COUNT;
 				return 0;
@@ -207,7 +207,7 @@ parse(struct parser *s, int c)
 			s->stg = STG_RANGE;
 			continue;
 		case STG_RANGE:
-			if (in_set(c, "wWeEbBdyc<>"   /* characterwise */
+			if (in_set(c, "wWeEbBdyc<>!"  /* characterwise */
 			              "^$%0hnN|{} l" /* more characterwise (incl. space, l) */
 			              "\x08\x7f"     /* BS, DEL */
 			              "GHL+-jk\r\n" /* linewise */

@@ -964,6 +964,14 @@ static const struct tc cases[] = {
 	/* :r! */
 	TC("read-shell",      ":r!echo hello\r:write\r",       "first\nlast\n", "first\nhello\nlast\n"),
 	TC("read-shell-addr", ":1r!echo inserted\r:write\r",   "aaa\nbbb\n",    "aaa\ninserted\nbbb\n"),
+	/* :{range}!cmd, !{motion}, !!, visual ! */
+	TC("filter-range-sort",   ":%!sort\r:write\r",       "banana\napple\ncherry\n", "apple\nbanana\ncherry\n"),
+	TC("filter-range-partial",":2,3!sort\r:write\r",     "z\nbanana\napple\ny\n",   "z\napple\nbanana\ny\n"),
+	TC("filter-bang-bang",    "!!tr a-z A-Z\r:write\r",  "hello\nworld\n",          "HELLO\nworld\n"),
+	TC("filter-bang-motion",  "!Gsort\r:write\r",        "banana\napple\ncherry\n", "apple\nbanana\ncherry\n"),
+	TC("filter-visual",       "Vj!sort\r:write\r",       "banana\napple\ncherry\n", "apple\nbanana\ncherry\n"),
+	TC("filter-fail-noop",    ":%!false\r:write\r",      "banana\napple\ncherry\n", "banana\napple\ncherry\n"),
+	TC("filter-undo",         ":%!sort\ru:write\r",      "banana\napple\ncherry\n", "banana\napple\ncherry\n"),
 };
 
 /* ------------------------------------------------------------------ */
