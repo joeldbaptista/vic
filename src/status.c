@@ -19,6 +19,7 @@
 #define _GNU_SOURCE
 #include "status.h"
 
+#include "codepoint.h"
 #include "input.h"
 #include "line.h"
 #include "screen.h"
@@ -37,10 +38,11 @@
  *   %m   " [Modified]" when the buffer has unsaved changes, empty otherwise
  *   %c   current line number
  *   %t   total line count
+ *   %C   current column number (1-based)
  *   %p   scroll position as a percentage
  *   %%   a literal '%'
  */
-#define STATUS_LINE_FORMAT "%M %F%R%m %c/%t %p%%"
+#define STATUS_LINE_FORMAT "%M %F%R%m %c/%t,%C %p%%"
 
 #define Isprint(c) ((unsigned char)(c) >= ' ' && (unsigned char)(c) < ASCII_DEL)
 #define ESC "\033"
@@ -138,6 +140,10 @@ format_edit_status(struct editor *g)
 			break;
 		case 't':
 			len += snprintf(buf + len, trunc_at - len + 1, "%d", g->status_tot);
+			break;
+		case 'C':
+			len += snprintf(buf + len, trunc_at - len + 1, "%d",
+			                get_column(g, g->dot) + 1);
 			break;
 		case 'p':
 			len += snprintf(buf + len, trunc_at - len + 1, "%d", percent);
