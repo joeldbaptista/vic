@@ -1310,6 +1310,117 @@ colon_do_shell(struct editor *g, const char *cmd)
 	redraw(g, TRUE);
 }
 
+/*
+ * Run cmd via /bin/sh with [q,r] as its stdin, capture stdout+stderr, and
+ * on a zero exit status replace [q,r] with the captured output.  Used by
+ * :{range}!cmd.
+ */
+static void
+colon_do_filter(struct editor *g, char *q, char *r, const char *cmd)
+{
+	/*
+	 * == :{range}!cmd — filter the addressed lines through cmd ==
+	 *
+	 * Writes [q,r] to a temp file so cmd can read it as stdin without the
+	 * write-side/read-side pipe deadlock a single bidirectional pipe would
+	 * risk, runs cmd via /bin/sh with a pipe capturing stdout+stderr, then
+	 * on exit 0 replaces [q,r] with the captured output.  A non-zero exit
+	 * leaves the buffer untouched and shows the captured output (the
+	 * command's error message) on the status line.
+	 */
+	char tmpname[] = "/tmp/vic-filter-XXXXXX";
+	int tmpfd;
+	int pipefd[2];
+	pid_t pid;
+	int status;
+	char *buf;
+	size_t cap, len;
+
+	if (!cmd || !*cmd) {
+		status_line(g, "!: no command given");
+		return;
+	}
+
+	tmpfd = mkstemp(tmpname);
+	if (tmpfd < 0) {
+		status_line_bold(g, "mkstemp: %s", strerror(errno));
+		return;
+	}
+	unlink(tmpname);
+	if (full_write(tmpfd, q, (size_t)(r - q + 1)) < 0) {
+		status_line_bold(g, "write: %s", strerror(errno));
+		close(tmpfd);
+		return;
+	}
+	lseek(tmpfd, 0, SEEK_SET);
+
+	if (pipe(pipefd) < 0) {
+		status_line_bold(g, "pipe: %s", strerror(errno));
+		close(tmpfd);
+		return;
+	}
+	pid = fork();
+	if (pid < 0) {
+		status_line_bold(g, "fork: %s", strerror(errno));
+		close(tmpfd);
+		close(pipefd[0]);
+		close(pipefd[1]);
+		return;
+	}
+	if (pid == 0) {
+		dup2(tmpfd, STDIN_FILENO);
+		close(tmpfd);
+		close(pipefd[0]);
+		dup2(pipefd[1], STDOUT_FILENO);
+		dup2(pipefd[1], STDERR_FILENO);
+		close(pipefd[1]);
+		execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
+		_exit(127);
+	}
+	close(tmpfd);
+	close(pipefd[1]);
+
+	cap = 4096;
+	len = 0;
+	buf = xmalloc(cap);
+	{
+		char tmp[4096];
+		ssize_t n;
+		while ((n = read(pipefd[0], tmp, sizeof(tmp))) > 0) {
+			if (len + (size_t)n + 2 > cap) {
+				cap = grow_cap(cap, len + (size_t)n + 2, cap);
+				buf = xrealloc(buf, cap);
+			}
+			memcpy(buf + len, tmp, (size_t)n);
+			len += (size_t)n;
+		}
+	}
+	close(pipefd[0]);
+	waitpid(pid, &status, 0);
+
+	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+		if (len > 0 && buf[len - 1] == '\n')
+			len--;
+		buf[len] = '\0';
+		if (len > 0)
+			status_line_bold(g, "!%s: %s", cmd, buf);
+		else
+			status_line_bold(g, "!%s: exit %d", cmd,
+			                  WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+		free(buf);
+		return;
+	}
+
+	if (len > 0 && buf[len - 1] != '\n')
+		buf[len++] = '\n';
+	buffer_replace_range(g, q, r, buf, (int)len);
+	g->modified_count++;
+	g->dot = q;
+	status_line(g, "%d lines filtered",
+	            len > 0 ? count_lines(g, q, q + len - 1) : 0);
+	free(buf);
+}
+
 /* ---- dispatcher ------------------------------------------------------ */
 
 /*
@@ -1367,7 +1478,8 @@ colon(struct editor *g, char *buf)
 	 * Entry point for all ':'-prefixed commands.  Strips leading colons and
 	 * whitespace, calls get_address to resolve any range, then:
 	 *
-	 *   '!'  — delegates to colon_do_shell
+	 *   '!'  — delegates to colon_do_shell (no range) or colon_do_filter
+	 *          (range given, e.g. ':%!sort')
 	 *   '='  — delegates to colon_do_linenum
 	 *   bare address — delegates to colon_do_addr_jump
 	 *   alpha command — looks up colon_cmds[] (prefix match, min length
@@ -1393,30 +1505,6 @@ colon(struct editor *g, char *buf)
 		goto done;
 	cs.buf = buf;
 
-	if (*buf == '!') {
-		colon_do_shell(g, skip_whitespace(buf + 1));
-		goto done;
-	}
-	if (*buf == '=') {
-		colon_do_linenum(g, cs.e, cs.got);
-		goto done;
-	}
-
-	/* extract alpha-only command name; detect trailing ! as force flag */
-	{
-		const char *src = buf;
-		int n = 0;
-		while (*src && isalpha((unsigned char)*src) &&
-		       n < (int)sizeof(cs_cmd) - 1)
-			cs_cmd[n++] = *src++;
-		cs_cmd[n] = '\0';
-		cs.useforce = (*src == '!' &&
-		               (!src[1] || isspace((unsigned char)src[1])));
-		src += cs.useforce ? 1 : 0;
-		cs.args = skip_whitespace((char *)src);
-	}
-	cs.cmd = cs_cmd;
-
 	cs.q = g->text;
 	cs.r = g->end - 1;
 	if (cs.got & 1) { /* GOT_ADDRESS */
@@ -1438,6 +1526,33 @@ colon(struct editor *g, char *buf)
 			cs.r = end_line(g, cs.r);
 		}
 	}
+
+	if (*buf == '!') {
+		if (cs.got & 1)
+			colon_do_filter(g, cs.q, cs.r, skip_whitespace(buf + 1));
+		else
+			colon_do_shell(g, skip_whitespace(buf + 1));
+		goto done;
+	}
+	if (*buf == '=') {
+		colon_do_linenum(g, cs.e, cs.got);
+		goto done;
+	}
+
+	/* extract alpha-only command name; detect trailing ! as force flag */
+	{
+		const char *src = buf;
+		int n = 0;
+		while (*src && isalpha((unsigned char)*src) &&
+		       n < (int)sizeof(cs_cmd) - 1)
+			cs_cmd[n++] = *src++;
+		cs_cmd[n] = '\0';
+		cs.useforce = (*src == '!' &&
+		               (!src[1] || isspace((unsigned char)src[1])));
+		src += cs.useforce ? 1 : 0;
+		cs.args = skip_whitespace((char *)src);
+	}
+	cs.cmd = cs_cmd;
 
 	if (cs_cmd[0] == '\0') {
 		colon_do_addr_jump(g, cs.e);

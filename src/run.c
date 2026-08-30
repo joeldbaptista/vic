@@ -56,32 +56,6 @@ is_ident(unsigned char c)
 	return is_ident_start(c) || (c >= '0' && c <= '9');
 }
 
-static void
-raw_replace(struct editor *g, char *rs, char *re,
-            const char *new_buf, int new_len)
-{
-	/*
-	 * == Replace the text [rs, re] (inclusive) with new_buf[0..new_len-1] ==
-	 *
-	 * Deletes the old range via text_hole_delete, then inserts the new
-	 * content via string_insert, chaining both into one undo unit.  If
-	 * new_len is 0, only the deletion is performed.
-	 */
-	char *tmp;
-
-	if (rs <= re)
-		text_hole_delete(g, rs, re, ALLOW_UNDO);
-	if (new_len <= 0)
-		return;
-	tmp = malloc((size_t)new_len + 1);
-	if (!tmp)
-		return;
-	memcpy(tmp, new_buf, (size_t)new_len);
-	tmp[new_len] = '\0';
-	string_insert(g, rs, tmp, ALLOW_UNDO_CHAIN);
-	free(tmp);
-}
-
 /* ---- upper / lower ---------------------------------------------------- */
 
 static void
@@ -158,7 +132,7 @@ run_trim(struct editor *g, int argc, char *argv[],
 		(void)line_start;
 	}
 	new_len = (int)(out - new_buf);
-	raw_replace(g, rs, re, new_buf, new_len);
+	buffer_replace_range(g, rs, re, new_buf, new_len);
 	free(new_buf);
 }
 
@@ -207,7 +181,7 @@ run_trimsel(struct editor *g, int argc, char *argv[],
 	}
 
 	if (start > end) {
-		raw_replace(g, g->mark[MARK_LT], g->mark[MARK_GT], "", 0);
+		buffer_replace_range(g, g->mark[MARK_LT], g->mark[MARK_GT], "", 0);
 		return;
 	}
 
@@ -223,7 +197,7 @@ run_trimsel(struct editor *g, int argc, char *argv[],
 			if (!tmp)
 				return;
 			memcpy(tmp, start, (size_t)new_len);
-			raw_replace(g, sel_start, sel_end, tmp, new_len);
+			buffer_replace_range(g, sel_start, sel_end, tmp, new_len);
 			free(tmp);
 		}
 	}
@@ -273,7 +247,7 @@ run_uniq(struct editor *g, int argc, char *argv[],
 			p++;
 	}
 	new_len = (int)(out - new_buf);
-	raw_replace(g, rs, re, new_buf, new_len);
+	buffer_replace_range(g, rs, re, new_buf, new_len);
 	free(new_buf);
 }
 
@@ -313,7 +287,7 @@ run_sort(struct editor *g, int argc, char *argv[],
 	 * == :run sort [-r] — sort lines in the range lexicographically ==
 	 *
 	 * -r reverses the order.  Splits the range into line_ref structs,
-	 * sorts with qsort(), then rebuilds the region with raw_replace.
+	 * sorts with qsort(), then rebuilds the region with buffer_replace_range.
 	 */
 	int reverse = (argc >= 2 && strcmp(argv[1], "-r") == 0);
 	int range_len = (int)(re - rs + 1);
@@ -357,7 +331,7 @@ run_sort(struct editor *g, int argc, char *argv[],
 		*out++ = '\n';
 
 	new_len = (int)(out - new_buf);
-	raw_replace(g, rs, re, new_buf, new_len);
+	buffer_replace_range(g, rs, re, new_buf, new_len);
 	free(lines);
 	free(new_buf);
 }
@@ -429,7 +403,7 @@ run_wrap(struct editor *g, int argc, char *argv[],
 	if (new_len > 0 && new_buf[new_len - 1] == '\n' &&
 	    (re < rs || *re != '\n'))
 		new_len--;
-	raw_replace(g, rs, re, new_buf, new_len);
+	buffer_replace_range(g, rs, re, new_buf, new_len);
 	free(new_buf);
 }
 
@@ -479,7 +453,7 @@ run_number(struct editor *g, int argc, char *argv[],
 		}
 	}
 	new_len = (int)(out - new_buf);
-	raw_replace(g, rs, re, new_buf, new_len);
+	buffer_replace_range(g, rs, re, new_buf, new_len);
 	free(new_buf);
 }
 
@@ -536,7 +510,7 @@ run_deindent(struct editor *g, int argc, char *argv[],
 		}
 	}
 	new_len = (int)(out - new_buf);
-	raw_replace(g, rs, re, new_buf, new_len);
+	buffer_replace_range(g, rs, re, new_buf, new_len);
 	free(new_buf);
 }
 
@@ -628,7 +602,7 @@ run_align(struct editor *g, int argc, char *argv[],
 	if (out > new_buf && *(out - 1) == '\n' && *re != '\n')
 		out--;
 	new_len = (int)(out - new_buf);
-	raw_replace(g, rs, re, new_buf, new_len);
+	buffer_replace_range(g, rs, re, new_buf, new_len);
 	free(new_buf);
 }
 
@@ -674,7 +648,7 @@ run_urlencode(struct editor *g, int argc, char *argv[],
 		}
 	}
 	new_len = (int)(out - new_buf);
-	raw_replace(g, rs, re, new_buf, new_len);
+	buffer_replace_range(g, rs, re, new_buf, new_len);
 	free(new_buf);
 }
 
@@ -728,7 +702,7 @@ run_urldecode(struct editor *g, int argc, char *argv[],
 		p++;
 	}
 	new_len = (int)(out - new_buf);
-	raw_replace(g, rs, re, new_buf, new_len);
+	buffer_replace_range(g, rs, re, new_buf, new_len);
 	free(new_buf);
 }
 
@@ -778,7 +752,7 @@ run_base64enc(struct editor *g, int argc, char *argv[],
 	if (col > 0)
 		*out++ = '\n';
 	new_len = (int)(out - new_buf);
-	raw_replace(g, rs, re, new_buf, new_len);
+	buffer_replace_range(g, rs, re, new_buf, new_len);
 	free(new_buf);
 }
 
@@ -841,7 +815,7 @@ run_base64dec(struct editor *g, int argc, char *argv[],
 			*out++ = (char)(bits & 0xff);
 	}
 	new_len = (int)(out - new_buf);
-	raw_replace(g, rs, re, new_buf, new_len);
+	buffer_replace_range(g, rs, re, new_buf, new_len);
 	free(new_buf);
 }
 
@@ -910,7 +884,7 @@ run_jsonesc(struct editor *g, int argc, char *argv[],
 		}
 	}
 	new_len = (int)(out - new_buf);
-	raw_replace(g, rs, re, new_buf, new_len);
+	buffer_replace_range(g, rs, re, new_buf, new_len);
 	free(new_buf);
 }
 
@@ -1009,7 +983,7 @@ run_jsonunesc(struct editor *g, int argc, char *argv[],
 		}
 	}
 	new_len = (int)(out - new_buf);
-	raw_replace(g, rs, re, new_buf, new_len);
+	buffer_replace_range(g, rs, re, new_buf, new_len);
 	free(new_buf);
 }
 

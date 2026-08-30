@@ -14,6 +14,7 @@ char *yank_delete(struct editor *g, char *start, char *stop, int buftype,
 char *yank_delete_current(struct editor *g, char *start, char *stop,
                           int buftype, int yf, int undo);
 void operator_run_change_delete_yank_cmd(struct editor *g, const struct cmd_ctx *ctx);
+void operator_run_filter_cmd(struct editor *g, const struct cmd_ctx *ctx);
 void operator_run_delete_or_substitute_cmd(struct editor *g, const struct cmd_ctx *ctx);
 void operator_run_change_or_delete_eol_cmd(struct editor *g, const struct cmd_ctx *ctx);
 void operator_run_replace_char_cmd(struct editor *g, const struct cmd_ctx *ctx);

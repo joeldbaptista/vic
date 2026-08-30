@@ -73,6 +73,11 @@ mode, `Esc` to return to normal mode.
 
 `d` `c` `y` `x` `r` `~` `J` `>` `<` work with counts and motions.
 
+`!{motion}` `!!` filter the addressed lines through an external shell
+command, replacing them with its output (`!Gsort`, `!!tr a-z A-Z`, `3!!sort`).
+Always linewise. Also works on a visual selection (`!`, prompts with
+`:'<,'>!`).
+
 Text objects: `iw` `aw` `iW` `aW`, `i"` `a"` `i'` `a'` `` i` `` `` a` ``,
 `i(` `a(` `i[` `a[` `i{` `a{` `i<` `a<`, `it` `at`.
 
@@ -96,6 +101,7 @@ with `'a`–`'z` jump motions.
 | `:s/pat/repl/flags` | substitute |
 | `:%s/pat/repl/g` | global substitute |
 | `:g/pat/cmd` `:v/pat/cmd` | global and inverse-global |
+| `:{range}!cmd` | filter the addressed lines through `cmd`, replacing them with its output (`:%!sort`) |
 | `:set option` | toggle or assign an option |
 
 #### `:g`/`:v` commands

@@ -36,13 +36,18 @@ Last updated: 2026-04-16.
 - Common line commands: `dd`, `cc`, `yy`, `D`, `C`, `Y`.
 - Put: `p`, `P`.
 - Character edits: `x`, `X`, `s`, `r`, `~`, `J`.
+- Filter: `!{motion}`, `!!` — pipe the addressed lines through an external
+  shell command and replace them with its output (e.g. `!Gsort`, `!!tr a-z
+  A-Z`). Always linewise, like `dd`/`yy`. A non-zero exit leaves the buffer
+  untouched.
 
 ## Visual mode and text objects
 
 - Visual selection toggle with `v`/`V`.
 - Block visual selection with `Ctrl-V`; anchor and cursor define a column rectangle.
 - Mode switching: pressing `v`, `V`, or `Ctrl-V` while in any visual mode switches to that mode without leaving visual.
-- Visual operators: delete, yank, change, put replacement.
+- Visual operators: delete, yank, change, put replacement, filter (`!`,
+  prompts with `:'<,'>!` for a shell command).
 - Block visual operators: delete (`d`/`x`), yank (`y`), change (`c`), case (`U`/`u`), indent (`>`/`<`), insert (`I`).
   - Yank stores column content per row; each row is newline-separated in the register with type BLOCK.
   - Lines that do not reach the left column of the block are skipped by operators.
@@ -72,6 +77,11 @@ Last updated: 2026-04-16.
 - Global command: `:g/pattern/cmd` — execute a colon command on every line matching a regex.
 - Inverse global: `:v/pattern/cmd` — execute a colon command on every line that does **not** match.
 - Address ranges are supported on both: `:%g/pattern/cmd`, `:'a,'bg/pattern/cmd`.
+- Filter: `:{range}!cmd` — pipe the addressed lines through an external
+  shell command and replace them with its output (e.g. `:%!sort`,
+  `:5,10!fmt -w72`). With no range, `:!cmd` is unchanged (interactive shell
+  escape). A non-zero exit leaves the buffer untouched and shows the
+  command's output on the status line.
 
 ## Options currently supported
 
