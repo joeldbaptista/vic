@@ -39,9 +39,9 @@
  * SGR escape sequences for each (in_visual, attr) state combination.
  * Every entry is a complete self-contained SGR sequence.
  * Monochromatic scheme (vim-monochrome style, black background):
- * NORMAL = reset, COMMENT = dim (dark grey), STRING = normal,
+ * NORMAL = reset, COMMENT = dim (dark grey), STRING = grey (256-color 245),
  * PREPROC = bold, KEYWORD = bold (white and bold on a black background),
- * NUMBER = normal.  No color codes — brightness only.
+ * NUMBER = normal.
  *
  * Visual selection uses plain reverse video (\033[7m) for all syntax
  * attribute types.  Combining reverse with a syntax color (e.g. \033[7;35m)
@@ -50,8 +50,8 @@
  * reverse video is terminal-agnostic and always produces a visible contrast.
  */
 static const char *const sgr_table[2][ATTR_COUNT] = {
-    /* not in visual selection — monochrome: bold=keyword/preproc, dim=comment */
-    {"\033[m", "\033[2m", "\033[m", "\033[1m", "\033[1m", "\033[m"},
+    /* not in visual selection — monochrome: bold=keyword/preproc, dim=comment, grey=string */
+    {"\033[m", "\033[2m", "\033[38;5;245m", "\033[1m", "\033[1m", "\033[m"},
     /* inside visual selection — plain reverse video overrides syntax color */
     {"\033[7m", "\033[7m", "\033[7m", "\033[7m", "\033[7m", "\033[7m"},
 };
