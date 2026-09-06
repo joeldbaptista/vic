@@ -81,6 +81,12 @@ index:
 install: clean vic
 	mv vic /usr/bin/vic
 	chmod a+x /usr/bin/vic
+	mkdir -p /usr/local/share/man/man1
+	cp vic.1 /usr/local/share/man/man1/vic.1
+
+install-man: vic.1
+	mkdir -p /usr/local/share/man/man1
+	cp vic.1 /usr/local/share/man/man1/vic.1
 
 deploy:
 	rsync -av --include='src/***' --include='data/***' --include='tools/***' \
