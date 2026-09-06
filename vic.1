@@ -1,0 +1,516 @@
+.TH VIC 1 "2026-09-06" "vic v1.0" "User Commands"
+.SH NAME
+vic \- a small vi/vim-compatible text editor
+.SH SYNOPSIS
+.B vic
+[\fIoptions\fR] \fIfile\fR [\fIfile\fR \&...]
+.SH DESCRIPTION
+.B vic
+is a small, dependency-free vi clone.
+It supports multiple modes (Normal, Insert, Replace, Visual, Command),
+a full motion and operator set, named registers, marks, undo/redo,
+syntax highlighting, and a built-in
+.B :run
+transformation engine.
+.PP
+Multiple files may be given on the command line.
+.B :n
+advances to the next file;
+.B :prev
+(or
+.BR :p )
+goes back;
+.B :rew
+restarts from the first.
+.SH OPTIONS
+.TP
+.B \-R
+Open file(s) in read-only mode.
+.TP
+.BI \-c " cmd"
+Execute the ex command
+.I cmd
+after opening the first file.
+.TP
+.B \-H
+Print the feature list and exit.
+.TP
+.B \-h
+Print usage and exit.
+.SH MODES
+.B vic
+operates in seven modes.
+.TS
+l l l.
+Mode	Enter	Leave
+_
+Normal	startup / \fBESC\fR	\(em
+Insert	\fBi a I A o O s S\fR	\fBESC\fR
+Replace	\fBR\fR	\fBESC\fR
+Visual char	\fBv\fR	\fBESC\fR or \fBv\fR
+Visual line	\fBV\fR	\fBESC\fR or \fBV\fR
+Visual block	\fBCtrl-V\fR	\fBESC\fR or \fBCtrl-V\fR
+Command	\fB:\fR	\fBEnter\fR / \fBESC\fR
+.TE
+.SH NORMAL MODE
+.SS Counts
+Any motion or operator may be prefixed with a count.
+Examples:
+.B 3j
+moves down 3 lines;
+.B d2w
+deletes 2 words;
+.B 5>>
+indents 5 lines.
+.SS Cursor Motion
+.TS
+l l.
+\fBh\fR / \fBl\fR	left / right
+\fBj\fR / \fBk\fR	down / up (column preserved across short lines)
+Arrow keys	same as \fBh j k l\fR
+\fBEnter\fR	next line, first non-blank
+\fB\-\fR	previous line, first non-blank
+\fBw\fR / \fBW\fR	forward to next word / WORD start
+\fBb\fR / \fBB\fR	backward to word / WORD start
+\fBe\fR / \fBE\fR	forward to word / WORD end
+\fB0\fR	beginning of line
+\fB^\fR	first non-blank of line
+\fB$\fR	end of line
+\fBgg\fR / \fB1G\fR	first line
+\fBG\fR	last line (or line N with \fBNG\fR)
+\fBH M L\fR	top / middle / bottom of screen
+\fB{ }\fR	previous / next paragraph
+\fBCtrl-F\fR / \fBCtrl-B\fR	page forward / backward
+\fBCtrl-D\fR / \fBCtrl-U\fR	half-page down / up
+\fBCtrl-E\fR / \fBCtrl-Y\fR	scroll one line down / up
+\fB%\fR	jump to matching bracket \fB()[]{}\fR
+\fBf\fR / \fBF\fR	find char forward / backward on line
+\fBt\fR / \fBT\fR	to just before char forward / backward
+\fB;\fR / \fB,\fR	repeat last f/F/t/T forward / backward
+.TE
+.SS Search
+.TS
+l l.
+\fB/\fIpat\fR	search forward for \fIpat\fR (POSIX ERE)
+\fB?\fIpat\fR	search backward
+\fBn\fR	repeat search in same direction
+\fBN\fR	repeat search in opposite direction
+\fB*\fR	search forward for word under cursor
+\fB#\fR	search backward for word under cursor
+\fBg*\fR	like \fB*\fR but without whole-word boundary
+\fBg#\fR	like \fB#\fR but without whole-word boundary
+.TE
+.SS Marks
+.TS
+l l.
+\fBma\fR	set mark \fIa\fR at current position
+\fB'a\fR	jump to line containing mark \fIa\fR
+\fB''\fR	jump to previous context position
+.TE
+Marks
+.B a\(endz
+are available.
+Visual mode automatically sets
+.B '<
+and
+.BR '> .
+.SS Operators
+Operators act on a motion:
+.BR d$ ,
+.BR c2w ,
+.BR y'a ,
+etc.
+Doubling an operator applies it to the current line:
+.BR dd ,
+.BR cc ,
+.BR yy ,
+.BR >> ,
+.BR << .
+.TS
+l l.
+\fBd\fR	delete
+\fBc\fR	change (delete + insert)
+\fBy\fR	yank (copy)
+\fB>\fR	indent right
+\fB<\fR	indent left
+\fB~\fR	toggle case
+.TE
+.SS Operator Shortcuts
+.TS
+l l.
+\fBD\fR	delete to end of line (\fBd$\fR)
+\fBC\fR	change to end of line (\fBc$\fR)
+\fBx\fR	delete character under cursor
+\fBX\fR	delete character before cursor
+\fBs\fR	substitute character (= \fBcl\fR)
+\fBS\fR	substitute line (= \fBcc\fR)
+\fBJ\fR	join current line with next
+\fBr\fR	replace single character
+.TE
+.SS Text Objects
+Text objects are used inside operators.
+.TS
+l l.
+\fBiw\fR	inner word
+\fBaw\fR	a word (includes surrounding whitespace)
+\fBi(\fR	inner () block
+\fBa(\fR	outer () block
+\fBi[\fR	inner [] block
+\fBi{\fR	inner {} block
+\fBit\fR	inner XML/HTML tag
+\fBi"\fR	inner double-quoted string
+\fBi'\fR	inner single-quoted string
+.TE
+.SS Put / Paste
+.TS
+l l.
+\fBp\fR	put after cursor / below line
+\fBP\fR	put before cursor / above line
+.TE
+.SS Registers
+Prefix any yank, delete, or put with
+.BI \&" x
+to use named register
+.I x
+.RB ( a \(en z ).
+The
+.B "+
+register reads and writes the shared (clipboard) register,
+backed by
+.IR ~/.cache/vic/yank .
+.PP
+Examples:
+.RS
+.nf
+"ayy        yank current line into register a
+"ap         put contents of register a
+"+p         put from shared register
+.fi
+.RE
+.SS Undo / Redo
+.TS
+l l.
+\fBu\fR	undo
+\fBCtrl-R\fR	redo
+\fBU\fR	restore current line to state at entry
+.TE
+.SS Repeat
+.B \&.
+repeats the last modifying command (including its count and register).
+.SS Miscellaneous
+.TS
+l l.
+\fBCtrl-L\fR	redraw screen
+\fBCtrl-G\fR	show status (filename, line count)
+\fBZZ\fR	write and quit
+\fBZQ\fR	quit without writing
+.TE
+.SH INSERT MODE
+Enter insert mode with
+.B i
+(before cursor),
+.B a
+(after cursor),
+.B I
+(line start),
+.B A
+(line end),
+.B o
+(new line below),
+.B O
+(new line above).
+.TS
+l l.
+\fBESC\fR	return to Normal mode
+\fBCtrl-H\fR / \fBBackspace\fR	backspace
+\fBCtrl-D\fR	remove one indent level
+\fBCtrl-V\fR	insert next character literally
+.TE
+.PP
+With
+.B autoindent
+set, new lines inherit the indentation of the previous line.
+With
+.B expandtab
+set, Tab inserts spaces instead of a tab character.
+.SH REPLACE MODE
+.B R
+enters Replace mode: typed characters overwrite existing text.
+.B r
+replaces only the character under the cursor, then returns to Normal mode.
+.SH VISUAL MODE
+.B v
+enters character-wise visual mode;
+.B V
+enters line-wise visual mode;
+.B Ctrl-V
+enters block (column) visual mode.
+Extend the selection with any motion command.
+Pressing
+.BR v ,
+.BR V ,
+or
+.B Ctrl-V
+while already in visual mode switches sub-mode without leaving visual.
+.B o
+swaps the cursor and anchor, so you can extend the selection from the other end.
+.SS Character and Line Operators
+.TS
+l l.
+\fBd\fR	delete selection
+\fBc\fR	change selection
+\fBy\fR	yank selection
+\fB>\fR	indent selection
+\fB<\fR	de-indent selection
+\fB~\fR	toggle case of selection
+\fB:\fR	enter command line with \fB'<,'>\fR pre-filled
+.TE
+.SS Block Visual Mode (Ctrl-V)
+The anchor and cursor define a column rectangle.
+All block operators skip rows that do not reach the left column of the block.
+.TS
+l l.
+\fBd\fR	delete the column rectangle
+\fBy\fR	yank the column rectangle
+\fBc\fR	delete rectangle and enter insert mode
+\fBI\fR	insert text at the left column of every row in the block
+\fB>\fR	indent lines covered by the block
+\fB<\fR	de-indent lines covered by the block
+\fBU\fR	uppercase the rectangle
+\fBu\fR	lowercase the rectangle
+.TE
+After leaving visual mode,
+.B '<
+and
+.B '>
+marks point to the start and end of the last selection.
+.SH COLON COMMANDS
+.SS Address Syntax
+Most colon commands accept an address or range before the command name.
+The following is an exhaustive list of address forms.
+.TS
+l l.
+\fIN\fR	line number N
+\fB.\fR	current line
+\fB$\fR	last line
+\fB%\fR	whole file (same as \fB1,$\fR)
+\fB'a\fR	line containing mark \fIa\fR
+\fB'<\fR \fB'>\fR	start/end of last visual selection
+\fB/\fIpattern\fB/\fR	next line matching pattern
+\fB?\fIpattern\fB?\fR	previous line matching pattern
+\fIaddr\fB+\fIN\fR	N lines after addr
+\fIaddr\fB-\fIN\fR	N lines before addr
+\fIa1\fB,\fIa2\fR	range from a1 to a2
+.TE
+.SS File and Session Commands
+.TS
+l l.
+\fB:w\fR	write file
+\fB:w \fIfilename\fR	write to filename
+\fB:w!\fR	force write (overwrite existing)
+\fB:q\fR	quit (fails if unsaved changes)
+\fB:q!\fR	quit without saving
+\fB:wq\fR / \fB:x\fR	write and quit
+\fB:wn\fR	write and advance to next file
+\fB:e \fIfile\fR	edit file (fails if unsaved; \fB:e!\fR forces)
+\fB:n\fR	next file in argument list
+\fB:prev\fR / \fB:p\fR	previous file
+\fB:rew\fR	rewind to first file
+.TE
+.SS Editing Commands
+.TS
+l l.
+\fB:[range]d\fR	delete lines
+\fB:[range]y\fR	yank lines
+\fB:[range]s/\fIF\fB/\fIR\fB/[g]\fR	substitute; \fBg\fR flag replaces all occurrences on line
+\fB:[range]g/\fIpat\fB/\fIcmd\fR	run cmd on lines matching pat
+\fB:[range]v/\fIpat\fB/\fIcmd\fR	run cmd on lines NOT matching pat
+\fB:r \fIfile\fR	read file below cursor
+\fB:r! \fIcmd\fR	read shell command output below cursor
+\fB:[\fIaddr\fB]\fR	jump to line number
+\fB:=\fR	print current line number
+\fB:list\fR	list current line showing control characters
+.TE
+.SS Marks and Info Commands
+.TS
+l l.
+\fB:ma \fIx\fR	set mark \fIx\fR (same as \fBmx\fR)
+\fB:fi \fIname\fR	rename current file
+\fB:f\fR	reprint file info on status bar
+\fB:ve\fR	show version
+\fB:fe\fR	show feature list
+.TE
+.SS Shell Commands
+.TS
+l l.
+\fB:! \fIcmd\fR	run shell command (press Enter to return)
+\fB:!\fR	launch \fB$SHELL\fR interactively
+.TE
+.SS Set Options
+.nf
+:set                     show all current options
+:set \fIoption\fR              enable a boolean option
+:set no\fIoption\fR            disable a boolean option
+:set \fIoption\fB=\fIvalue\fR        set a value option
+.fi
+.PP
+The following is an exhaustive list of options.
+.TS
+l l l l.
+Option	Abbrev	Default	Meaning
+_
+\fBautoindent\fR	\fBai\fR	off	new lines inherit indentation
+\fBexpandtab\fR	\fBet\fR	off	Tab key inserts spaces
+\fBflash\fR	\fBfl\fR	off	flash screen instead of beeping
+\fBignorecase\fR	\fBic\fR	off	case-insensitive search
+\fBshowmatch\fR	\fBsm\fR	off	briefly jump to matching bracket on insert
+\fBtabstop=\fIN\fR	\fBts=\fIN\fR	8	visual width of a tab character
+\fBnumber\fR	\fBnu\fR	off	show absolute line numbers
+\fBrelativenumber\fR	\fBrnu\fR	off	show relative line numbers
+\fBcursorshape=\fIN\fR	\fBcshp=\fIN\fR	\(em	cursor shape in normal mode (1=block 2=underline 3=bar)
+\fBcursorshapeinsert=\fIN\fR	\fBcshpi=\fIN\fR	\(em	cursor shape in insert mode
+\fBundofile\fR	\fBuf\fR	off	persist undo history across sessions
+\fBsyntax\fR	\fBsyn\fR	on	syntax highlighting
+.TE
+.SH RUN COMMANDS
+.B :[range] run
+.I command
+.RI [ args ]
+.PP
+Applies a built-in transformation to the buffer or an optional address range.
+Without a range, the entire buffer is used.
+.SS Text Case
+.nf
+:run upper          uppercase all text in range
+:run lower          lowercase all text in range
+.fi
+.SS Whitespace
+.nf
+:run trim           strip trailing whitespace from each line
+:run deindent       remove one indent level from each line
+:run deindent \fIN\fR     remove N indent levels
+:run wrap \fIN\fR         hard-wrap lines at column N (N must be >= 4)
+.fi
+.SS Lines
+.nf
+:run sort           sort lines alphabetically
+:run sort -r        sort in reverse order
+:run uniq           remove consecutive duplicate lines
+:run number         prepend "1. 2. 3. \&..." to each line
+.fi
+.SS Alignment
+.nf
+:run align \fICHAR\fR     align all lines so the first occurrence of CHAR
+                    starts at the same column (padded with spaces)
+.fi
+.SS Encoding
+.nf
+:run urlencode      percent-encode the range (RFC 3986 unreserved chars kept)
+:run urldecode      decode percent-encoded text (+ decoded as space)
+:run base64enc      base-64 encode the range (76-char wrapped lines)
+:run base64dec      base-64 decode the range
+:run jsonesc        escape the range as a JSON string value
+:run jsonunesc      unescape a JSON-escaped string back to plain text
+.fi
+.SS Statistics
+.nf
+:run wc             count lines, words, bytes in range
+:run col            report maximum line width in range
+:run freq           show top-5 identifier frequencies in range
+.fi
+.SS Hashing (FNV-1a)
+.nf
+:run hash               hash entire range; show decimal + hex on status bar
+:run hash mod \fIN\fR         per-identifier hash%N; report total and collisions
+:run hash replace       replace every identifier with its raw 64-bit hash
+:run hash replace mod \fIN\fR replace every identifier with hash%N
+.fi
+.SS Identifier Case Conversion
+.nf
+:run convert c2s    camelCase \(-> snake_case
+:run convert s2c    snake_case \(-> camelCase (lowerCamelCase)
+:run convert s2uc   snake_case \(-> UpperCamelCase (PascalCase)
+.fi
+Only identifier tokens
+.RB ( [A-Za-z_][A-Za-z0-9_]* )
+are modified; all other text is passed through unchanged.
+.SS Highlight
+.nf
+:run highlight \fIpattern\fR  highlight all occurrences of pattern in the viewport
+:run highlight          clear all highlighting
+.fi
+.I pattern
+is a POSIX BRE regex.
+Highlighting is visual-only: it does not move the cursor or affect the buffer.
+.SS Debugging
+.nf
+:run echo \fIargs\fR    print arguments to status bar (no range effect)
+.fi
+.SH SYNTAX HIGHLIGHTING
+Highlighting activates automatically based on file extension.
+The following is an exhaustive list of supported languages.
+.TS
+l l.
+Language	Extensions
+_
+C	\fB.c\fR \fB.h\fR
+C++	\fB.cc\fR \fB.cpp\fR \fB.cxx\fR \fB.hpp\fR \fB.hh\fR \fB.hxx\fR
+Shell	\fB.sh\fR
+Markdown	\fB.md\fR
+SQL	\fB.sql\fR
+Python	\fB.py\fR
+.TE
+.PP
+Highlighted elements include (non-exhaustive): keywords, numbers, strings,
+comments, preprocessor directives (C/C++), and decorators (Python).
+.SH STARTUP CONFIGURATION
+On startup,
+.B vic
+reads configuration in the following order (exhaustive list):
+.IP 1.
+The
+.B EXINIT
+environment variable, treated as a sequence of ex commands.
+.IP 2.
+.IR ~/.exrc ,
+if it exists, is owned by the current user, and is not group- or world-writable.
+.PP
+Any valid colon command may appear in these files, one per line.
+Example:
+.RS
+.nf
+set ai et ts=4
+set ic
+set nu
+.fi
+.RE
+.SH ENVIRONMENT
+.TP
+.B EXINIT
+Sequence of ex commands executed at startup.
+.TP
+.B SHELL
+Used by
+.B :!
+when launching an interactive shell.
+.SH FILES
+.TP
+.I ~/.exrc
+User startup configuration file.
+.TP
+.I ~/.cache/vic/yank
+Shared register backing the
+.B "+
+register.
+.TP
+.I src/config.def.h
+Compile-time defaults. Copy to
+.I src/config.h
+and rebuild to customise.
+.SH SEE ALSO
+.BR vi (1),
+.BR vim (1),
+.BR ex (1)
+.SH AUTHORS
+.B vic
+is derived from BusyBox vi and rewritten around suckless principles.
