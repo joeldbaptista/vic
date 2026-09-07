@@ -4,6 +4,9 @@ vic \- a small vi/vim-compatible text editor
 .SH SYNOPSIS
 .B vic
 [\fIoptions\fR] \fIfile\fR [\fIfile\fR \&...]
+.br
+.B vic
+[\fIoptions\fR] \-
 .SH DESCRIPTION
 .B vic
 is a small, dependency-free vi clone.
@@ -12,6 +15,18 @@ a full motion and operator set, named registers, marks, undo/redo,
 syntax highlighting, and a built-in
 .B :run
 transformation engine.
+.PP
+A
+.I file
+of
+.B \-
+reads the document from standard input instead of from disk.  The
+resulting buffer has no name, so
+.B :write
+must be given a path.  Because vic reads its keystrokes from standard
+input as well, it drains the document first and then reopens
+.I /dev/tty
+for terminal input.
 .PP
 Multiple files may be given on the command line.
 .B :n
@@ -31,6 +46,21 @@ Open file(s) in read-only mode.
 Execute the ex command
 .I cmd
 after opening the first file.
+.TP
+.B \-p
+Pager mode.  Implies
+.BR \-R ,
+and strips terminal markup from the document as it is loaded: CSI escape
+sequences, and the backspace overstrike
+.RB ( X \eb X
+for bold,
+.RB _ \eb X
+for underline) that groff emits when
+.B GROFF_NO_SGR
+is set.  Intended for use as a
+.BR man (1)
+pager, as in
+.BR "MANPAGER=\(dqvic \-p \-\(dq" .
 .TP
 .B \-H
 Print the feature list and exit.
