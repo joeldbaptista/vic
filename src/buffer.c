@@ -441,42 +441,64 @@ string_insert(struct editor *g, char *p, const char *s, int undo)
 	return bias;
 }
 
-void
+uintptr_t
 buffer_replace_range(struct editor *g, char *rs, char *re,
-                      const char *new_buf, int new_len)
+                     const char *new_buf, int new_len)
 {
 	/*
-	 * == Replace the text [rs, re] (inclusive) with new_buf[0..new_len-1] ==
+	 * == Replace [rs, re] (inclusive) with new_buf[0..new_len-1] ==
 	 *
 	 * Deletes the old range via text_hole_delete, then inserts the new
 	 * content via string_insert, chaining both into one undo unit.  If
 	 * new_len is 0, only the deletion is performed.
 	 *
-	 * If [rs, re] spans through the buffer's sentinel byte (re == end-1)
-	 * and new_buf also ends in '\n', leave that one byte physically
-	 * undisturbed rather than deleting and reinserting it: undo_push()
-	 * (undo.c) silently trims one byte off a DEL record that spans the
-	 * whole live buffer, which would otherwise lose the final '\n' on
-	 * undo.  Deleting/inserting one byte short is content-equivalent
-	 * since both old and new content end in '\n' there.
+	 * If [rs, re] spans through the buffer's sentinel byte (re == end-1),
+	 * that byte is itself a '\n', and new_buf also ends in '\n', leave
+	 * that one byte physically undisturbed rather than deleting and
+	 * reinserting it: undo_push() (undo.c) silently trims one byte off a
+	 * DEL record that spans the whole live buffer, which would otherwise
+	 * lose the final '\n' on undo.  Deleting/inserting one byte short is
+	 * content-equivalent only when the byte left behind is the same '\n'
+	 * the new content ends with, so *re is checked too: init_text_buffer
+	 * appends a sentinel newline, but commands that rewrite the tail (for
+	 * example :run base64dec) can leave a non-newline byte there, and
+	 * skipping it then duplicates that byte and drops the newline.
+	 *
+	 * - Returns the realloc bias, like string_insert: the insert can grow
+	 *   the text store and move it, so callers holding rs, re or any other
+	 *   raw pointer into the buffer must add this value to them.  g->dot,
+	 *   g->end and the marks are adjusted by text_hole_make itself.
 	 */
 	char *tmp;
+	uintptr_t bias;
+	int deleted = 0;
 
-	if (re == g->end - 1 && new_len > 0 && new_buf[new_len - 1] == '\n') {
+	if (re == g->end - 1 && *re == '\n' && new_len > 0 &&
+	    new_buf[new_len - 1] == '\n') {
 		re--;
 		new_len--;
 	}
-	if (rs <= re)
+	if (rs <= re) {
 		text_hole_delete(g, rs, re, ALLOW_UNDO);
+		deleted = 1;
+	}
 	if (new_len <= 0)
-		return;
-	tmp = malloc((size_t)new_len + 1);
-	if (!tmp)
-		return;
+		return 0;
+	tmp = xmalloc((size_t)new_len + 1);
 	memcpy(tmp, new_buf, (size_t)new_len);
 	tmp[new_len] = '\0';
-	string_insert(g, rs, tmp, ALLOW_UNDO_CHAIN);
+	/*
+	 * The insert is chained onto the delete so one 'u' reverses both.  It
+	 * must NOT be chained when there was no delete to chain onto (the
+	 * range was empty, or the sentinel trim above consumed all of it):
+	 * apply_undo_stack keeps popping while entries are chained, so an
+	 * unanchored CHAIN record makes a single 'u' swallow the previous,
+	 * unrelated command as well.
+	 */
+	bias = string_insert(g, rs, tmp,
+	                     deleted ? ALLOW_UNDO_CHAIN : ALLOW_UNDO);
 	free(tmp);
+	return bias;
 }
 
 int
