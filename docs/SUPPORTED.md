@@ -2,7 +2,7 @@
 
 This file defines the supported behavior contract for this project.
 
-Last updated: 2026-04-16.
+Last updated: 2026-09-07.
 
 ## Scope of support
 
@@ -112,6 +112,16 @@ Last updated: 2026-04-16.
 - `:set undofile` serialises the undo stack to a sidecar (`.filename.vundo`) on every `:w`.
 - On re-open, history is restored; `u` and `Ctrl-R` work across sessions.
 - A stale sidecar (file changed outside the editor since last save) is silently ignored.
+
+## Standard input and pager mode
+
+- A file name of `-` reads the document from standard input; vic drains it
+  before the editor starts and then reopens `/dev/tty` for keystrokes.
+- The buffer loaded from `-` is unnamed, so `:write` requires a path.
+- `-p` is pager mode: it implies `-R` and strips CSI escape sequences and
+  backspace overstrike from the document as it loads.
+- `MANPAGER="vic -p -"` is a supported configuration. See
+  [PAGER.md](PAGER.md).
 
 ## Terminal and UX support
 
