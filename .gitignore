@@ -2,3 +2,10 @@ vic
 src/config.h
 _docs/
 notes/
+vic-static
+vic-asan
+vic-ubsan
+tests/test_*
+!tests/test_*.c
+!tests/test_*.h
+tools/check-pty
