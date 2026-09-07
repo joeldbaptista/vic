@@ -26,9 +26,7 @@
 #include "line.h"
 #include "motion.h"
 #include "operator.h"
-#include "search.h"
 #include "status.h"
-#include "term.h"
 
 void
 visual_block_insert_replay(struct editor *g)
@@ -449,12 +447,30 @@ block_op_delete(struct block_op_ctx *ctx)
 	reset_ydreg(g);
 }
 
+static void
+block_op_filter(struct block_op_ctx *ctx)
+{
+	/*
+	 * == ! in visual block mode — filter the covered lines ==
+	 *
+	 * Filtering is linewise even in block mode (matching vim), so the
+	 * whole lines spanned by the block are filtered rather than the
+	 * per-row column slices the other block operators use.
+	 */
+	struct editor *g = ctx->g;
+
+	filter_prompt_and_run(g, begin_line(g, ctx->ranges[0].p),
+	                      end_line(g, ctx->ranges[ctx->count - 1].p),
+	                      ":'<,'>!");
+}
+
 struct block_op_entry {
 	int op;
 	block_op_fn fn;
 };
 
 static const struct block_op_entry block_op_table[] = {
+    {'!', block_op_filter},
     {'y', block_op_yank},
     {'U', block_op_case},
     {'u', block_op_case},
@@ -570,17 +586,15 @@ char_op_filter(struct char_op_ctx *ctx)
 	/*
 	 * == ! — filter the visual selection through a shell command ==
 	 *
-	 * visual_apply_operator() has already called visual_leave(), which
-	 * sets the '< '> marks from the selection, so this only needs to
-	 * prompt for the command and hand it to colon(), matching how ':'
-	 * prompts with ":'<,'>" in visual mode (run_colon_cmd, vic.c).
+	 * Like the normal-mode ! operator, filtering is always linewise, so
+	 * the selection is expanded to whole lines.  The resolved range is
+	 * passed as pointers rather than through the '< '> marks, so the
+	 * marks visual_leave() just set stay as the user's last selection.
 	 */
 	struct editor *g = ctx->g;
-	char *line;
 
-	term_cursor_shape_set(term_cursor_shape_get_ex());
-	line = get_input_line(g, ":'<,'>!");
-	colon(g, line);
+	filter_prompt_and_run(g, begin_line(g, ctx->start),
+	                      end_line(g, ctx->stop), ":'<,'>!");
 }
 
 struct char_op_entry {
