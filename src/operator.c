@@ -27,9 +27,7 @@
 #include "line.h"
 #include "motion.h"
 #include "range.h"
-#include "search.h"
 #include "status.h"
-#include "term.h"
 #include "undo.h"
 
 enum {
@@ -367,26 +365,35 @@ operator_run_filter_cmd(struct editor *g, const struct cmd_ctx *ctx)
 	 *
 	 * Resolves the motion via range_find(), like c/d/y, but unlike those
 	 * the ! operator is always linewise regardless of the motion's own
-	 * buftype (matching vim).  Expands to full line boundaries, marks the
-	 * range as '< '> (the same slots visual mode uses), then prompts with
-	 * ":'<,'>!" so the user only has to type the shell command; colon()
-	 * does the actual filtering via colon_do_filter().
+	 * buftype (matching vim), so the range is expanded to full line
+	 * boundaries before it is handed to filter_prompt_and_run().
+	 *
+	 * range_find() moves g->dot as a side effect of running the motion,
+	 * so the original position is saved as an offset (a pointer would go
+	 * stale if the filter reallocs the text store) and restored when the
+	 * filter did not run — the user pressed ESC at the prompt, or the
+	 * command exited non-zero and left the buffer untouched.
 	 */
 	char *p;
 	char *q;
-	char *line;
-	int buftype;
+	uintptr_t dot_off;
+	int pre_modified;
 
-	buftype = range_find(g, &p, &q, ctx);
-	if (buftype == -1)
+	dot_off = (uintptr_t)(g->dot - g->text);
+
+	if (range_find(g, &p, &q, ctx) == -1) {
+		reset_ydreg(g);
 		return;
+	}
 
-	g->mark[MARK_LT] = begin_line(g, p);
-	g->mark[MARK_GT] = end_line(g, q);
+	p = begin_line(g, p);
+	q = end_line(g, q);
 
-	term_cursor_shape_set(term_cursor_shape_get_ex());
-	line = get_input_line(g, ":'<,'>!");
-	colon(g, line);
+	pre_modified = g->modified_count;
+	filter_prompt_and_run(g, p, q, ":!");
+	if (g->modified_count == pre_modified)
+		g->dot = g->text + dot_off;
+	reset_ydreg(g);
 }
 
 void
