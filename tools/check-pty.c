@@ -836,6 +836,134 @@ run_block_visual_highlight_c(const char *vi_path, const char *tmp_dir)
 }
 
 /* ------------------------------------------------------------------ */
+/* stdin ("-") and pager-mode cases                                     */
+/* ------------------------------------------------------------------ */
+
+/*
+ * spawn_vic_stdin — fork and exec vic with the document arriving on a pipe.
+ *
+ * stdout/stderr go to the PTY slave and the slave is the controlling
+ * terminal, but STDIN_FILENO is the read end of a pipe.  That is exactly
+ * how man(1) invokes a pager, and it is the case vic has to survive: it
+ * must drain the pipe first and then reopen /dev/tty for its keystrokes.
+ */
+static pid_t
+spawn_vic_stdin(int master, const char *vi_path, const char *flag,
+                const char *data)
+{
+	char slave_name[64];
+	const char *sn;
+	pid_t pid;
+	int slave;
+	int pfd[2];
+
+	sn = ptsname(master);
+	if (!sn) {
+		perror("ptsname");
+		return -1;
+	}
+	strncpy(slave_name, sn, sizeof(slave_name) - 1);
+	slave_name[sizeof(slave_name) - 1] = '\0';
+
+	if (pipe(pfd) < 0) {
+		perror("pipe");
+		return -1;
+	}
+
+	pid = fork();
+	if (pid < 0) {
+		perror("fork");
+		close(pfd[0]);
+		close(pfd[1]);
+		return -1;
+	}
+	if (pid == 0) {
+		if (setsid() < 0)
+			_exit(1);
+		slave = open(slave_name, O_RDWR);
+		if (slave < 0)
+			_exit(1);
+		if (ioctl(slave, TIOCSCTTY, 0) < 0)
+			_exit(1);
+		close(pfd[1]);
+		dup2(pfd[0], STDIN_FILENO);
+		dup2(slave, STDOUT_FILENO);
+		dup2(slave, STDERR_FILENO);
+		if (pfd[0] > STDERR_FILENO)
+			close(pfd[0]);
+		if (slave > STDERR_FILENO)
+			close(slave);
+		close(master);
+		if (flag)
+			execlp(vi_path, vi_path, flag, "-", (char *)NULL);
+		else
+			execlp(vi_path, vi_path, "-", (char *)NULL);
+		_exit(127);
+	}
+	close(pfd[0]);
+	write_all(pfd[1], data, strlen(data));
+	close(pfd[1]);
+	return pid;
+}
+
+/*
+ * run_stdin_case — pipe `sample` into vic and inspect the rendered screen.
+ *
+ * `want` must appear in the rendered text and `unwanted` must not; either
+ * may be NULL to skip that half.  The screen is inspected rather than a
+ * written file because the "-" buffer is deliberately unnamed, so there is
+ * no path for :write to save to.
+ */
+static int
+run_stdin_case(const char *name, const char *vi_path, const char *flag,
+               const char *sample, const char *want, const char *unwanted)
+{
+	int master, rc, timed_out, ok;
+	int has_want, has_unwanted;
+	pid_t pid;
+	struct buf out;
+	char *stripped;
+
+	master = open_master_pty();
+	if (master < 0)
+		return 0;
+	pid = spawn_vic_stdin(master, vi_path, flag, sample);
+	if (pid < 0) {
+		close(master);
+		return 0;
+	}
+
+	buf_init(&out);
+	wait_startup(master, pid, &out, "No file", STARTUP_TIMEOUT);
+	pump_output(master, pid, &out, STARTUP_SETTLE);
+
+	stripped = strip_ansi(out.data, out.len);
+	has_want = want ? (strstr(stripped, want) != NULL) : 1;
+	has_unwanted = unwanted ? (strstr(stripped, unwanted) != NULL) : 0;
+
+	write_all(master, ":q!\r", 4);
+	rc = finish(pump_output(master, pid, &out, FINISH_TIMEOUT), pid,
+	            &timed_out);
+	close(master);
+
+	ok = has_want && !has_unwanted;
+
+	printf("[%s] rc=%d timed_out=%s\n", name, rc,
+	       timed_out ? "True" : "False");
+	if (ok) {
+		printf("[%s] PASS\n", name);
+	} else {
+		printf("[%s] FAIL\n", name);
+		printf("[%s] has_want=%d has_unwanted=%d\n", name, has_want,
+		       has_unwanted);
+		printf("[%s] rendered:\n%s\n", name, stripped);
+	}
+	free(stripped);
+	buf_free(&out);
+	return ok;
+}
+
+/* ------------------------------------------------------------------ */
 /* test case table                                                      */
 /* ------------------------------------------------------------------ */
 
@@ -1078,6 +1206,25 @@ main(int argc, char *argv[])
 		all_ok = run_visual_esc_clear(vi_path, tmp_dir) && all_ok;
 	if (matches_filter("visual-block-highlight-c", filter))
 		all_ok = run_block_visual_highlight_c(vi_path, tmp_dir) && all_ok;
+
+	/* "-" reads the document from a pipe; -p additionally strips the
+	 * terminal markup a formatter such as man(1) emits. */
+	if (matches_filter("stdin-pipe", filter))
+		all_ok = run_stdin_case("stdin-pipe", vi_path, NULL,
+		                        "alpha\nbeta\n", "alpha", NULL)
+		         && all_ok;
+	if (matches_filter("stdin-keeps-escapes", filter))
+		all_ok = run_stdin_case("stdin-keeps-escapes", vi_path, NULL,
+		                        "\033[1mBOLD\033[0m plain\n",
+		                        "^[[1m", NULL) && all_ok;
+	if (matches_filter("stdin-pager-sgr", filter))
+		all_ok = run_stdin_case("stdin-pager-sgr", vi_path, "-p",
+		                        "\033[1mBOLD\033[0m plain\n",
+		                        "BOLD plain", "^[[") && all_ok;
+	if (matches_filter("stdin-pager-overstrike", filter))
+		all_ok = run_stdin_case("stdin-pager-overstrike", vi_path, "-p",
+		                        "B\bBO\bOL\bLD\bD\n", "BOLD", "^H")
+		         && all_ok;
 
 	return all_ok ? 0 : 1;
 }
