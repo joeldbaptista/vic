@@ -722,40 +722,6 @@ colon_do_quit(struct editor *g, const struct colon_state *cs)
 }
 
 /*
- * Drain fd to EOF into a freshly allocated buffer.  On success returns the
- * buffer (NUL-terminated, with two spare bytes so the caller can append a
- * newline) and stores the byte count in *lenp.  Returns NULL on a read
- * error: a partial capture is never handed back, because callers use it to
- * replace existing text and a silent truncation would destroy data.
- */
-static char *
-drain_fd(int fd, size_t *lenp)
-{
-	char tmp[4096];
-	char *buf;
-	size_t cap = 4096;
-	size_t len = 0;
-	ssize_t n;
-
-	buf = xmalloc(cap);
-	while ((n = safe_read(fd, tmp, sizeof(tmp))) > 0) {
-		if (len + (size_t)n + 2 > cap) {
-			cap = grow_cap(cap, len + (size_t)n + 2, cap);
-			buf = xrealloc(buf, cap);
-		}
-		memcpy(buf + len, tmp, (size_t)n);
-		len += (size_t)n;
-	}
-	if (n < 0) {
-		free(buf);
-		return NULL;
-	}
-	buf[len] = '\0';
-	*lenp = len;
-	return buf;
-}
-
-/*
  * Run cmd via /bin/sh, capture stdout+stderr, insert output into the
  * buffer after the addressed line (or current line if no address).
  * Used by :r!cmd.

@@ -7,6 +7,7 @@ struct cli_options {
 	int usage_only;
 	int help;
 	int readonly;
+	int pager;
 };
 
 void run_cmds(struct editor *g, char *p);
@@ -19,6 +20,7 @@ int parse_cli_options(struct editor *g, int argc, char **argv,
 int apply_cli_options(struct editor *g, const struct cli_options *opts);
 void init_globals(struct editor *g);
 void apply_filetype_options(struct editor *g, const char *fn);
+void setup_stdin_file(struct editor *g, char **argv, int filecnt);
 void run_file_loop(struct editor *g, char **argv);
 void run_editor_session(struct editor *g, char **argv);
 

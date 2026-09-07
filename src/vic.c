@@ -84,7 +84,9 @@ show_help(void)
 	     "\n\tSettable options with \":set\""
 	     "\n\tSignal catching- ^C"
 	     "\n\tJob suspend and resume with ^Z"
-	     "\n\tAdapt to window re-sizes");
+	     "\n\tAdapt to window re-sizes"
+	     "\n\tRead the document from a pipe with the file name -"
+	     "\n\tPager mode with -p (read-only, escape sequences stripped)");
 }
 
 void
@@ -1719,6 +1721,8 @@ main(int argc, char **argv)
 
 	argv += arg_index;
 	g->cmdline_filecnt = argc - arg_index;
+	setup_stdin_file(g, argv, g->cmdline_filecnt);
 	run_editor_session(g, argv);
+	free(g->stdin_text);
 	return 0;
 }

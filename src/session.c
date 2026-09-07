@@ -146,6 +146,7 @@ parse_cli_options(struct editor *g, int argc, char **argv,
 	 * Recognised flags:
 	 *   -c CMD  — defer CMD for execution after file load
 	 *   -R      — open files read-only
+	 *   -p      — pager mode: read-only, and strip terminal escapes
 	 *   -H      — show full help and exit
 	 *   -h      — show usage and exit
 	 *
@@ -157,7 +158,7 @@ parse_cli_options(struct editor *g, int argc, char **argv,
 	memset(opts, 0, sizeof(*opts));
 	optind = 1;
 	opterr = 0;
-	while ((c = getopt(argc, argv, "c:HhR")) != -1) {
+	while ((c = getopt(argc, argv, "c:HhpR")) != -1) {
 		switch (c) {
 		case 'c':
 			append_initial_cmd(g, optarg);
@@ -167,6 +168,9 @@ parse_cli_options(struct editor *g, int argc, char **argv,
 			break;
 		case 'h':
 			opts->usage_only = 1;
+			break;
+		case 'p':
+			opts->pager = 1;
 			break;
 		case 'R':
 			opts->readonly = 1;
@@ -186,10 +190,12 @@ apply_cli_options(struct editor *g, const struct cli_options *opts)
 	 * == Apply already-parsed CLI options to the editor state ==
 	 *
 	 * Sets readonly mode and handles -H / -h by printing help/usage and
-	 * returning -1 so the caller knows to exit.
+	 * returning -1 so the caller knows to exit.  -p implies -R, because a
+	 * pager must never write the document back.
 	 */
-	if (opts->readonly)
+	if (opts->readonly || opts->pager)
 		SET_READONLY_MODE(g->readonly_mode);
+	g->pager_mode = opts->pager;
 	if (opts->help)
 		show_help();
 	if (opts->help || opts->usage_only) {
@@ -247,6 +253,57 @@ init_globals(struct editor *g)
 	g->refresh_last_modified_count = INT_MIN;
 	g->last_search_pattern = xzalloc(2);
 	g->undo_queue_state = UNDO_EMPTY;
+}
+
+static int
+has_stdin_arg(char **argv, int filecnt)
+{
+	/*
+	 * == Report whether "-" appears among the command-line files ==
+	 */
+	int i;
+
+	for (i = 0; i < filecnt; i++) {
+		if (argv[i] && strcmp(argv[i], "-") == 0)
+			return 1;
+	}
+	return 0;
+}
+
+void
+setup_stdin_file(struct editor *g, char **argv, int filecnt)
+{
+	/*
+	 * == Slurp stdin for the "-" pseudo-file and reattach the terminal ==
+	 *
+	 * vic reads every keystroke from STDIN_FILENO, so a piped-in document
+	 * and the user's keys cannot share that descriptor.  The document is
+	 * therefore read to EOF up front and kept in g->stdin_text for
+	 * init_text_buffer, then /dev/tty is dup2'd onto STDIN_FILENO.  Doing
+	 * the swap on the descriptor rather than threading a second fd through
+	 * the editor means every later terminal read, ioctl and tcsetattr —
+	 * and every child of :sh or :!cmd — sees the terminal without further
+	 * change.
+	 *
+	 * No-op unless "-" was given, so ordinary invocations are unaffected.
+	 */
+	int ttyfd;
+
+	if (!has_stdin_arg(argv, filecnt))
+		return;
+
+	g->stdin_text = drain_fd(STDIN_FILENO, &g->stdin_len);
+	if (!g->stdin_text)
+		die("can't read standard input");
+
+	ttyfd = open("/dev/tty", O_RDWR);
+	if (ttyfd < 0)
+		die("no terminal available to read commands from");
+	if (ttyfd != STDIN_FILENO) {
+		if (dup2(ttyfd, STDIN_FILENO) < 0)
+			die("can't reattach the terminal to stdin");
+		close(ttyfd);
+	}
 }
 
 void

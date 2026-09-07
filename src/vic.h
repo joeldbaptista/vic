@@ -242,6 +242,7 @@ struct editor {
 	/* --- Settings (:set options) --- */
 	int setops;
 	int readonly_mode;
+	int pager_mode; /* -p: strip terminal escapes from the document */
 	int tabstop;
 	int cshp; /* cursor shape */
 
@@ -300,6 +301,8 @@ struct editor {
 	/* --- Files --- */
 	char *current_filename;
 	char *alt_filename;
+	char *stdin_text; /* content slurped for the "-" file, or NULL */
+	size_t stdin_len; /* byte count in stdin_text */
 
 	/* --- Undo --- */
 	char undo_queue_state; /* UNDO_INS, UNDO_DEL, or UNDO_EMPTY */
@@ -348,6 +351,7 @@ char *xstrndup(const char *s, size_t n);
 ssize_t safe_read(int fd, void *buf, size_t count);
 ssize_t full_read(int fd, void *buf, size_t len);
 ssize_t full_write(int fd, const void *buf, size_t len);
+char *drain_fd(int fd, size_t *lenp);
 int safe_poll(struct pollfd *pfd, nfds_t nfds, int timeout);
 int get_terminal_width_height(int fd, unsigned *width, unsigned *height);
 

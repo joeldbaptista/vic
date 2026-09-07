@@ -381,6 +381,82 @@ update_filename(struct editor *g, char *fn)
 	}
 }
 
+static int
+stdin_text_insert(struct editor *g, char *p)
+{
+	/*
+	 * == Insert the document slurped from stdin at position p ==
+	 *
+	 * Mirrors file_insert's bulk path, but the bytes come from the buffer
+	 * setup_stdin_file() read before the terminal was reattached: a pipe
+	 * has no size to stat and cannot be rewound, so it is already in
+	 * memory.
+	 *
+	 * - Returns the byte count inserted, or 0 when stdin was empty.
+	 */
+	int size;
+
+	if (!g->stdin_text || g->stdin_len == 0)
+		return 0;
+	size = (g->stdin_len < INT_MAX ? (int)g->stdin_len : INT_MAX);
+	p += text_hole_make(g, p, size);
+	memcpy(p, g->stdin_text, (size_t)size);
+	undo_push_insert(g, p, size, ALLOW_UNDO);
+	return size;
+}
+
+static void
+strip_terminal_escapes(struct editor *g)
+{
+	/*
+	 * == Remove terminal control markup from the freshly loaded buffer ==
+	 *
+	 * Pager mode (-p) exists so a formatted document can be piped in.
+	 * vic renders no attributes, so the markup its producers emit would
+	 * otherwise show up as literal text.  Two encodings are removed, and
+	 * they are the only two nroff and groff produce:
+	 *
+	 *   1. CSI sequences — ESC '[', parameter bytes 0x30-0x3f,
+	 *      intermediate bytes 0x20-0x2f, one final byte 0x40-0x7e.
+	 *   2. Backspace overstrike — "X\bX" for bold and "_\bX" for
+	 *      underline, which groff emits when GROFF_NO_SGR is set.
+	 *
+	 * Both passes rewrite in place and only ever shrink the text, so no
+	 * reallocation happens and g->text stays valid.  Called before the
+	 * trailing-newline fixup, which is why that check also guards against
+	 * an emptied buffer.
+	 */
+	char *r;
+	char *w;
+
+	r = w = g->text;
+	while (r < g->end) {
+		if (*r == ASCII_ESC && r + 1 < g->end && r[1] == '[') {
+			char *q = r + 2;
+			while (q < g->end && *q >= 0x30 && *q <= 0x3f)
+				q++;
+			while (q < g->end && *q >= 0x20 && *q <= 0x2f)
+				q++;
+			if (q < g->end && *q >= 0x40 && *q <= 0x7e) {
+				r = q + 1;
+				continue;
+			}
+		}
+		*w++ = *r++;
+	}
+	g->end = w;
+
+	r = w = g->text;
+	while (r < g->end) {
+		if (r + 1 < g->end && r[1] == '\b') {
+			r += 2;
+			continue;
+		}
+		*w++ = *r++;
+	}
+	g->end = w;
+}
+
 int
 init_text_buffer(struct editor *g, char *fn)
 {
@@ -396,14 +472,27 @@ init_text_buffer(struct editor *g, char *fn)
 	 *   file.
 	 */
 	int rc;
+	int from_stdin = (fn && strcmp(fn, "-") == 0);
 
 	free(g->text);
 	g->text_size = 10240;
 	g->screenbegin = g->dot = g->end = g->text = xzalloc((size_t)g->text_size);
 
-	update_filename(g, fn);
-	rc = file_insert(g, fn, g->text, 1);
-	if (rc <= 0 || *(g->end - 1) != '\n') {
+	if (from_stdin) {
+		/*
+		 * "-" is an unnamed buffer: there is no path to write back
+		 * to and no undo sidecar to load, so fn is dropped here and
+		 * the calls below see NULL.
+		 */
+		fn = NULL;
+		rc = stdin_text_insert(g, g->text);
+	} else {
+		update_filename(g, fn);
+		rc = file_insert(g, fn, g->text, 1);
+	}
+	if (g->pager_mode)
+		strip_terminal_escapes(g);
+	if (rc <= 0 || g->end == g->text || *(g->end - 1) != '\n') {
 		char_insert(g, g->end, '\n', NO_UNDO);
 	}
 

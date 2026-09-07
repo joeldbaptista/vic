@@ -4,7 +4,8 @@
  *   - abort-on-OOM wrappers: xmalloc, xzalloc, xrealloc, xstrdup, xstrndup,
  *     xasprintf
  *   - dynamic array growth: grow_cap
- *   - POSIX I/O helpers: safe_read, full_read, full_write, safe_poll
+ *   - POSIX I/O helpers: safe_read, full_read, full_write, drain_fd,
+ *     safe_poll
  *   - Terminal helpers: get_terminal_width_height, set_termios_to_raw,
  *     tcsetattr_stdin_TCSANOW
  *   - Portability shims: strchrnul, memrchr, xmalloc_open_read_close
@@ -31,11 +32,15 @@ show_usage(void)
 {
 	/*
 	 * == Print a one-line usage summary to stderr ==
+	 *
+	 * A FILE of "-" reads the document from standard input, and -p
+	 * is pager mode.
 	 */
 	fprintf(stderr, "usage: vi "
 	                "[-c CMD] "
 	                "[-R] "
-	                "[-H] [FILE]...\n");
+	                "[-p] "
+	                "[-H] [FILE|-]...\n");
 }
 
 void *
@@ -207,6 +212,42 @@ full_write(int fd, const void *buf, size_t len)
 		total += (size_t)w;
 	}
 	return (ssize_t)total;
+}
+
+char *
+drain_fd(int fd, size_t *lenp)
+{
+	/*
+	 * == Read fd to EOF into a freshly allocated buffer ==
+	 *
+	 * On success returns the buffer (NUL-terminated, with two spare
+	 * bytes so the caller can append a newline) and stores the byte
+	 * count in *lenp.  Returns NULL on a read error: a partial capture
+	 * is never handed back, because callers use it to replace existing
+	 * text and a silent truncation would destroy data.
+	 */
+	char tmp[4096];
+	char *buf;
+	size_t cap = 4096;
+	size_t len = 0;
+	ssize_t n;
+
+	buf = xmalloc(cap);
+	while ((n = safe_read(fd, tmp, sizeof(tmp))) > 0) {
+		if (len + (size_t)n + 2 > cap) {
+			cap = grow_cap(cap, len + (size_t)n + 2, cap);
+			buf = xrealloc(buf, cap);
+		}
+		memcpy(buf + len, tmp, (size_t)n);
+		len += (size_t)n;
+	}
+	if (n < 0) {
+		free(buf);
+		return NULL;
+	}
+	buf[len] = '\0';
+	*lenp = len;
+	return buf;
 }
 
 int
