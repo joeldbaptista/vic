@@ -26,6 +26,7 @@
 #include "term.h"
 #include "undo.h"
 
+#include <limits.h>
 #include <sys/wait.h>
 
 #define Isprint(c) ((unsigned char)(c) >= ' ' && (unsigned char)(c) < ASCII_DEL)
@@ -371,14 +372,15 @@ global(struct editor *g, char *p, int invert, int b, int e,
 	}
 	if (gstart < 1)
 		gstart = 1;
-	if (gend > count_lines(g, g->text, g->end - 1))
-		gend = count_lines(g, g->text, g->end - 1);
+	if (gend > total_line_count(g))
+		gend = total_line_count(g);
 
 	/* Compile pattern. */
 	cflags = IS_IGNORECASE(g) ? REG_ICASE : 0;
 	if (regcomp(&preg, pat, cflags) != 0) {
 		status_line_bold(g, ":g bad pattern");
 		free(pat);
+		free(gcmd);
 		return;
 	}
 	free(pat);
@@ -403,7 +405,8 @@ global(struct editor *g, char *p, int invert, int b, int e,
 
 		if (matched != invert) {
 			if (nmatches == cap) {
-				cap = (int)grow_cap((size_t)cap, (size_t)nmatches + 1, 64);
+				cap = (int)grow_cap((size_t)cap,
+				                    (size_t)nmatches + 1, 64);
 				offsets = xrealloc(offsets, (size_t)cap * sizeof(int));
 			}
 			offsets[nmatches++] = (int)(line - g->text);
@@ -537,6 +540,7 @@ colon_do_edit(struct editor *g, const struct colon_state *cs)
 	}
 
 	size = init_text_buffer(g, fn);
+	apply_filetype_options(g, fn);
 
 	if (ureg >= 0 && ureg < 28) {
 		free(g->reg[ureg]);
@@ -718,6 +722,40 @@ colon_do_quit(struct editor *g, const struct colon_state *cs)
 }
 
 /*
+ * Drain fd to EOF into a freshly allocated buffer.  On success returns the
+ * buffer (NUL-terminated, with two spare bytes so the caller can append a
+ * newline) and stores the byte count in *lenp.  Returns NULL on a read
+ * error: a partial capture is never handed back, because callers use it to
+ * replace existing text and a silent truncation would destroy data.
+ */
+static char *
+drain_fd(int fd, size_t *lenp)
+{
+	char tmp[4096];
+	char *buf;
+	size_t cap = 4096;
+	size_t len = 0;
+	ssize_t n;
+
+	buf = xmalloc(cap);
+	while ((n = safe_read(fd, tmp, sizeof(tmp))) > 0) {
+		if (len + (size_t)n + 2 > cap) {
+			cap = grow_cap(cap, len + (size_t)n + 2, cap);
+			buf = xrealloc(buf, cap);
+		}
+		memcpy(buf + len, tmp, (size_t)n);
+		len += (size_t)n;
+	}
+	if (n < 0) {
+		free(buf);
+		return NULL;
+	}
+	buf[len] = '\0';
+	*lenp = len;
+	return buf;
+}
+
+/*
  * Run cmd via /bin/sh, capture stdout+stderr, insert output into the
  * buffer after the addressed line (or current line if no address).
  * Used by :r!cmd.
@@ -735,7 +773,7 @@ colon_do_read_cmd(struct editor *g, int e, unsigned got, const char *cmd)
 	int pipefd[2];
 	pid_t pid;
 	char *buf;
-	size_t cap, len;
+	size_t len;
 	char *ins_pt;
 	int num;
 	uintptr_t ofs;
@@ -761,24 +799,14 @@ colon_do_read_cmd(struct editor *g, int e, unsigned got, const char *cmd)
 	}
 	close(pipefd[1]);
 
-	cap = 4096;
-	len = 0;
-	buf = xmalloc(cap);
-	{
-		char tmp[4096];
-		ssize_t n;
-		while ((n = read(pipefd[0], tmp, sizeof(tmp))) > 0) {
-			if (len + (size_t)n + 2 > cap) {
-				cap = grow_cap(cap, len + (size_t)n + 2, cap);
-				buf = xrealloc(buf, cap);
-			}
-			memcpy(buf + len, tmp, (size_t)n);
-			len += (size_t)n;
-		}
-	}
+	buf = drain_fd(pipefd[0], &len);
 	close(pipefd[0]);
 	waitpid(pid, NULL, 0);
 
+	if (buf == NULL) {
+		status_line_bold(g, "read: %s", strerror(errno));
+		return;
+	}
 	if (len == 0) {
 		free(buf);
 		status_line_bold(g, "No output from command");
@@ -1315,7 +1343,7 @@ colon_do_shell(struct editor *g, const char *cmd)
  * on a zero exit status replace [q,r] with the captured output.  Used by
  * :{range}!cmd.
  */
-static void
+void
 colon_do_filter(struct editor *g, char *q, char *r, const char *cmd)
 {
 	/*
@@ -1323,18 +1351,26 @@ colon_do_filter(struct editor *g, char *q, char *r, const char *cmd)
 	 *
 	 * Writes [q,r] to a temp file so cmd can read it as stdin without the
 	 * write-side/read-side pipe deadlock a single bidirectional pipe would
-	 * risk, runs cmd via /bin/sh with a pipe capturing stdout+stderr, then
-	 * on exit 0 replaces [q,r] with the captured output.  A non-zero exit
-	 * leaves the buffer untouched and shows the captured output (the
-	 * command's error message) on the status line.
+	 * risk, runs cmd via /bin/sh with a pipe capturing stdout, then on
+	 * exit 0 replaces [q,r] with the captured output.  A non-zero exit
+	 * leaves the buffer untouched and shows the command's stderr on the
+	 * status line.
+	 *
+	 * stderr goes to a second temp file rather than into the stdout pipe:
+	 * a filter that exits 0 while warning on stderr (python -W,
+	 * clang-format, many linters) would otherwise have its warning text
+	 * inserted into the user's buffer.  It is read back only on failure,
+	 * to build the message.
 	 */
 	char tmpname[] = "/tmp/vic-filter-XXXXXX";
+	char errname[] = "/tmp/vic-filter-err-XXXXXX";
 	int tmpfd;
+	int errfd;
 	int pipefd[2];
 	pid_t pid;
-	int status;
+	int status = 0;
 	char *buf;
-	size_t cap, len;
+	size_t len = 0;
 
 	if (!cmd || !*cmd) {
 		status_line(g, "!: no command given");
@@ -1354,15 +1390,25 @@ colon_do_filter(struct editor *g, char *q, char *r, const char *cmd)
 	}
 	lseek(tmpfd, 0, SEEK_SET);
 
+	errfd = mkstemp(errname);
+	if (errfd < 0) {
+		status_line_bold(g, "mkstemp: %s", strerror(errno));
+		close(tmpfd);
+		return;
+	}
+	unlink(errname);
+
 	if (pipe(pipefd) < 0) {
 		status_line_bold(g, "pipe: %s", strerror(errno));
 		close(tmpfd);
+		close(errfd);
 		return;
 	}
 	pid = fork();
 	if (pid < 0) {
 		status_line_bold(g, "fork: %s", strerror(errno));
 		close(tmpfd);
+		close(errfd);
 		close(pipefd[0]);
 		close(pipefd[1]);
 		return;
@@ -1370,9 +1416,10 @@ colon_do_filter(struct editor *g, char *q, char *r, const char *cmd)
 	if (pid == 0) {
 		dup2(tmpfd, STDIN_FILENO);
 		close(tmpfd);
+		dup2(errfd, STDERR_FILENO);
+		close(errfd);
 		close(pipefd[0]);
 		dup2(pipefd[1], STDOUT_FILENO);
-		dup2(pipefd[1], STDERR_FILENO);
 		close(pipefd[1]);
 		execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
 		_exit(127);
@@ -1380,45 +1427,96 @@ colon_do_filter(struct editor *g, char *q, char *r, const char *cmd)
 	close(tmpfd);
 	close(pipefd[1]);
 
-	cap = 4096;
-	len = 0;
-	buf = xmalloc(cap);
-	{
-		char tmp[4096];
-		ssize_t n;
-		while ((n = read(pipefd[0], tmp, sizeof(tmp))) > 0) {
-			if (len + (size_t)n + 2 > cap) {
-				cap = grow_cap(cap, len + (size_t)n + 2, cap);
-				buf = xrealloc(buf, cap);
-			}
-			memcpy(buf + len, tmp, (size_t)n);
-			len += (size_t)n;
-		}
-	}
+	buf = drain_fd(pipefd[0], &len);
 	close(pipefd[0]);
-	waitpid(pid, &status, 0);
 
-	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-		if (len > 0 && buf[len - 1] == '\n')
-			len--;
-		buf[len] = '\0';
-		if (len > 0)
-			status_line_bold(g, "!%s: %s", cmd, buf);
-		else
-			status_line_bold(g, "!%s: exit %d", cmd,
-			                  WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+	if (waitpid(pid, &status, 0) < 0)
+		status = -1;
+
+	/* A read error means the capture is incomplete.  Since the capture is
+	 * about to REPLACE the addressed lines, a partial one is data loss;
+	 * report it and leave the buffer alone. */
+	if (buf == NULL) {
+		close(errfd);
+		status_line_bold(g, "!%s: read: %s", cmd, strerror(errno));
+		return;
+	}
+	/* new_len is an int; refuse rather than wrap it negative, which would
+	 * delete the range and insert nothing. */
+	if (len > (size_t)INT_MAX) {
 		free(buf);
+		close(errfd);
+		status_line_bold(g, "!%s: output too large", cmd);
 		return;
 	}
 
+	if (status < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+		char safe[PRINT_LITERAL_LEN];
+		char *emsg;
+		size_t elen = 0;
+
+		free(buf);
+		lseek(errfd, 0, SEEK_SET);
+		emsg = drain_fd(errfd, &elen);
+		close(errfd);
+		while (elen > 0 &&
+		       (emsg[elen - 1] == '\n' || emsg[elen - 1] == '\r'))
+			emsg[--elen] = '\0';
+		/* The message is whatever the command wrote to stderr, so it
+		 * goes through print_literal before it reaches the terminal:
+		 * raw escape sequences in it would otherwise repaint or
+		 * reposition the screen from inside the status line. */
+		if (elen > 0) {
+			print_literal(safe, emsg);
+			status_line_bold(g, "!%s: %s", cmd, safe);
+		} else
+			status_line_bold(g, "!%s: exit %d", cmd,
+			                 (status >= 0 && WIFEXITED(status))
+			                     ? WEXITSTATUS(status)
+			                     : -1);
+		free(emsg);
+		return;
+	}
+	close(errfd);
+
 	if (len > 0 && buf[len - 1] != '\n')
 		buf[len++] = '\n';
-	buffer_replace_range(g, q, r, buf, (int)len);
-	g->modified_count++;
+	/* The insert can move the text store; buffer_replace_range returns the
+	 * realloc bias so q stays valid (g->dot is adjusted by text_hole_make,
+	 * but a raw local is not). */
+	q += buffer_replace_range(g, q, r, buf, (int)len);
 	g->dot = q;
 	status_line(g, "%d lines filtered",
 	            len > 0 ? count_lines(g, q, q + len - 1) : 0);
 	free(buf);
+}
+
+void
+filter_prompt_and_run(struct editor *g, char *q, char *r, const char *prompt)
+{
+	/*
+	 * == Prompt for a shell command and filter [q, r] through it ==
+	 *
+	 * Shared by the ! operator (operator.c) and visual-mode ! (visual.c).
+	 * The range is handed over as pointers rather than re-derived from an
+	 * address string, so the '< '> marks are left untouched and colon()'s
+	 * address parser is not re-entered.  prompt is cosmetic only; the
+	 * caller has already resolved the range.
+	 *
+	 * get_input_line returns the prompt itself when the user presses ESC,
+	 * and returns a short string when the user backspaces past the prompt;
+	 * both leave no command text, so both are a no-op here.
+	 */
+	char *line;
+	size_t plen = strlen(prompt);
+
+	term_cursor_shape_set(term_cursor_shape_get_ex());
+	line = get_input_line(g, prompt);
+	if (strlen(line) <= plen)
+		return;
+	line = skip_whitespace(line + plen);
+	if (*line)
+		colon_do_filter(g, q, r, line);
 }
 
 /* ---- dispatcher ------------------------------------------------------ */
@@ -1509,8 +1607,10 @@ colon(struct editor *g, char *buf)
 	cs.r = g->end - 1;
 	if (cs.got & 1) { /* GOT_ADDRESS */
 		int lines;
-		if (cs.e < 0 ||
-		    cs.e > (lines = count_lines(g, g->text, g->end - 1))) {
+		/* total_line_count caches against modified_count; this block
+		 * now runs for every addressed command, so the uncached
+		 * count_lines full-buffer scan it used to do is not free. */
+		if (cs.e < 0 || cs.e > (lines = total_line_count(g))) {
 			status_line_bold(g, "Invalid range");
 			goto done;
 		}
@@ -1529,7 +1629,8 @@ colon(struct editor *g, char *buf)
 
 	if (*buf == '!') {
 		if (cs.got & 1)
-			colon_do_filter(g, cs.q, cs.r, skip_whitespace(buf + 1));
+			colon_do_filter(g, cs.q, cs.r,
+			                skip_whitespace(buf + 1));
 		else
 			colon_do_shell(g, skip_whitespace(buf + 1));
 		goto done;
