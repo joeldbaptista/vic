@@ -41,10 +41,31 @@ libraries.
 vic file           # open file for editing
 vic -R file        # open read-only
 vic -c 'cmd' file  # run an ex command on startup
+cmd | vic -        # read the document from a pipe
+cmd | vic -p -     # same, as a pager: read-only, terminal markup stripped
 ```
 
 The interface is standard vi. Editing is modal: press `i` to enter insert
 mode, `Esc` to return to normal mode.
+
+## As a pager
+
+A file name of `-` reads the document from standard input. vic drains the
+pipe first, then reopens `/dev/tty` for keystrokes, so the document and the
+user's keys do not have to share a descriptor. The buffer that results has
+no name, so `:write` must be given a path.
+
+`-p` adds what a pager needs on top of that: it implies `-R`, and it removes
+the terminal markup a formatter emits — CSI escape sequences, and the
+backspace overstrike groff produces when `GROFF_NO_SGR` is set. That makes
+vic usable as the man(1) pager:
+
+```sh
+export MANPAGER="vic -p -"
+```
+
+`docs/PAGER.md` covers the setup, the reason the descriptor swap is needed,
+and the regression coverage.
 
 ## Features
 
