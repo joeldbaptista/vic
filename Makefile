@@ -78,11 +78,9 @@ frmt:
 index:
 	grep -n -E '^[a-zA-Z][a-zA-Z0-9_]+\(' src/*.c > functions.idx
 
-install: clean vic
+install: clean vic install-man
 	mv vic /usr/bin/vic
 	chmod a+x /usr/bin/vic
-	mkdir -p /usr/local/share/man/man1
-	cp vic.1 /usr/local/share/man/man1/vic.1
 
 install-man: vic.1
 	mkdir -p /usr/local/share/man/man1
@@ -90,7 +88,7 @@ install-man: vic.1
 
 deploy:
 	rsync -av --include='src/***' --include='data/***' --include='tools/***' \
-	    --include='Makefile' --exclude='*' ./ w01:~/vic/
+	    --include='Makefile' --include='vic.1' --exclude='*' ./ w01:~/vic/
 	ssh w01 "cd ~/vic && make clean && make"
 
 clean:

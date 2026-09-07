@@ -1,7 +1,6 @@
 #define _GNU_SOURCE
 #include "vic.h"
 #include "buffer.h"
-#include "color.h"
 #include "codepoint.h"
 #include "context.h"
 #include "editcmd.h"
@@ -1478,12 +1477,7 @@ edit_file(struct editor *g, char *fn)
 	g->ccol = 0;
 
 	/* Set file specific attributes */
-	{
-		const struct colorizer *cz = colorizer_find(fn);
-		if (cz && cz->tabstop)
-			g->tabstop = cz->tabstop;
-	}
-	
+	apply_filetype_options(g, fn);
 
 	signal(SIGWINCH, winch_handler);
 	signal(SIGTSTP, tstp_handler);
@@ -1671,9 +1665,14 @@ edit_file(struct editor *g, char *fn)
 			do_cmd(g, c, ctx_p);
 			/* snapshot for '.' repeat when the buffer was changed.
 			 * Skip for '.' itself — run_repeat_last_modifying_cmd
-			 * handles its own snapshot to preserve the original ctx. */
+			 * handles its own snapshot to preserve the original
+			 * ctx.  Skip '!' too: the shell command is typed at a
+			 * prompt and is not carried in the ctx, so replaying
+			 * the ctx would re-open the prompt and feed the user's
+			 * next keystrokes to /bin/sh instead of repeating the
+			 * filter. */
 			if (ctx_p != NULL && g->modified_count != pre_modified &&
-			    ctx.op != '.') {
+			    ctx.op != '.' && ctx.op != '!') {
 				g->last_cmd_ctx = ctx;
 				g->has_last_cmd_ctx = 1;
 				if (!g->adding2q)

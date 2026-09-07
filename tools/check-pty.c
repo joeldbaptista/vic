@@ -972,6 +972,35 @@ static const struct tc cases[] = {
 	TC("filter-visual",       "Vj!sort\r:write\r",       "banana\napple\ncherry\n", "apple\nbanana\ncherry\n"),
 	TC("filter-fail-noop",    ":%!false\r:write\r",      "banana\napple\ncherry\n", "banana\napple\ncherry\n"),
 	TC("filter-undo",         ":%!sort\ru:write\r",      "banana\napple\ncherry\n", "banana\napple\ncherry\n"),
+	/* Output larger than the buffer's capacity forces text_hole_make to
+	 * realloc; colon_do_filter must follow the realloc bias or its range
+	 * pointer dangles (it used to SEGV here). */
+	TC("filter-grow-realloc", ":%!sed 's/^/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/'\r:write\r",
+	                          "a\nb\n",
+	                          "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxa\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxb\n"),
+	/* Redo must re-apply BOTH halves of the delete+insert replace. */
+	TC("filter-undo-redo",    ":%!sort\ru\x12:write\r",  "banana\napple\ncherry\n", "apple\nbanana\ncherry\n"),
+	TC("run-sort-undo-redo",  ":%run sort\ru\x12:write\r","banana\napple\ncherry\n", "apple\nbanana\ncherry\n"),
+	/* A filter that exits 0 while writing to stderr must not have that
+	 * text inserted into the buffer. */
+	TC("filter-stderr-out",   ":%!sh -c 'echo WARN >&2; sort'\r:write\r",
+	                          "banana\napple\n", "apple\nbanana\n"),
+	/* The sentinel shortcut only applies when the last byte really is a
+	 * newline; base64dec leaves a non-newline tail. */
+	TC("filter-no-final-nl",  ":%run base64dec\r!!cat\r:write\r", "YWJj\n", "abc\n"),
+	/* '!' in visual BLOCK mode filters the covered lines linewise. */
+	TC("filter-visual-block", "\x16j!sort\r:write\r", "banana\napple\ncherry\n", "apple\nbanana\ncherry\n"),
+	/* Cancelling the ! prompt with ESC must leave the buffer and the
+	 * cursor alone (the cursor used to be stranded at the motion end). */
+	TC("filter-esc-cancel",   "!G\033" "D:write\r", "aaa\nbbb\nccc\n", "\nbbb\nccc\n"),
+	/* !{motion} must not clobber the '< '> marks. */
+	TC("filter-keeps-marks",  "Vj\x1bG!!cat\r:'<,'>d\r:write\r",
+	                          "a1\nb2\nc3\n", "c3\n"),
+	/* When the range is exactly the sentinel newline the delete half is
+	 * skipped, so the insert must not be recorded as a chained undo entry
+	 * — an unanchored chain makes one 'u' swallow the previous command. */
+	TC("filter-sentinel-undo", "x:$!sed 's/^/X/'\ru:write\r", "abc\n\n", "bc\n\n"),
+	TC("run-sentinel-undo",    "x:$run number\ru:write\r",    "abc\n\n", "bc\n\n"),
 };
 
 /* ------------------------------------------------------------------ */

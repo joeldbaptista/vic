@@ -131,7 +131,7 @@ re-run once per match rather than acting on the line.
 | `flash` | `fl` | off | flash instead of bell |
 | `number` | `nu` | off | show line numbers |
 | `relativenumber` | `rnu` | off | show relative line numbers |
-| `tabstop` | `ts` | 8 | tab display width |
+| `tabstop` | `ts` | 8 | tab display width (see note below) |
 | `cursorshape` | `cshp` | 1 | normal-mode cursor (DECSCUSR 0–6) |
 | `cursorshapeinsert` | `cshpi` | 5 | insert-mode cursor (DECSCUSR 0–6) |
 | `undofile` | `uf` | off | persist undo history to disk |
@@ -139,18 +139,24 @@ re-run once per match rather than acting on the line.
 Cursor shape values: `0` terminal default, `1` blinking block, `2` block,
 `3` blinking underline, `4` underline, `5` blinking pipe, `6` pipe.
 
+`tabstop` is re-seeded from the file type every time a file is opened, so
+the default above applies only to file types that declare no width of their
+own. Markdown, Python, shell and SQL files use 4; C and C++ files use 8. A
+`:set tabstop=N` therefore lasts until the next file is opened.
+
 ### Syntax highlighting
 
-Highlighting is activated automatically by file extension. Colour
-assignments (ANSI 16-colour):
+Highlighting is activated automatically by file extension. The scheme is
+monochromatic: tokens are distinguished by SGR attribute rather than by
+colour, so it reads the same on any background.
 
-| Token | Colour |
-|-------|--------|
+| Token | Rendering |
+|-------|-----------|
 | keyword | bold |
-| string / character literal | yellow |
-| comment | cyan |
-| preprocessor | magenta |
-| number | green |
+| preprocessor | bold |
+| string / character literal | grey (256-colour 245) |
+| comment | dim |
+| number | normal |
 
 Languages and extensions:
 

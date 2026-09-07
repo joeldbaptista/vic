@@ -101,6 +101,11 @@ Last updated: 2026-04-16.
 - Automatic on open; driven by file extension.
 - C / C++ files (`.c`, `.h`, `.cc`, `.cpp`, `.cxx`, `.hh`, `.hpp`, `.inl`): keywords, types,
   string/character literals, single- and multi-line comments, preprocessor directives, numbers.
+- The scheme is monochromatic: tokens are distinguished by SGR attribute (bold, dim, grey),
+  not by colour.
+- Opening a file also re-seeds `tabstop` from the file type, overriding the `config.h`
+  default and any earlier `:set tabstop=`. Markdown, Python, shell and SQL use 4; C and
+  C++ use 8; every other file type uses the `config.h` default.
 
 ## Persistent undo
 

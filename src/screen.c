@@ -37,7 +37,14 @@
 
 /*
  * SGR escape sequences for each (in_visual, attr) state combination.
- * Every entry is a complete self-contained SGR sequence.
+ * Every entry is a complete self-contained SGR sequence: format_line emits
+ * one entry per attribute change and nothing else, so each must fully
+ * replace the previous attribute rather than add to it.  That is why the
+ * syntax entries lead with the 0 (reset) parameter — SGR 1 (bold) does not
+ * clear SGR 2 (dim) and vice versa, so a bare "\033[1m" after a comment
+ * would render the next token dim AND bold.  The colour codes this row
+ * replaced were self-replacing and did not need it.
+ *
  * Monochromatic scheme (vim-monochrome style, black background):
  * NORMAL = reset, COMMENT = dim (dark grey), STRING = grey (256-color 245),
  * PREPROC = bold, KEYWORD = bold (white and bold on a black background),
@@ -50,8 +57,10 @@
  * reverse video is terminal-agnostic and always produces a visible contrast.
  */
 static const char *const sgr_table[2][ATTR_COUNT] = {
-    /* not in visual selection — monochrome: bold=keyword/preproc, dim=comment, grey=string */
-    {"\033[m", "\033[2m", "\033[38;5;245m", "\033[1m", "\033[1m", "\033[m"},
+    /* not in visual selection — monochrome:
+     * bold = keyword/preproc, dim = comment, grey = string */
+    {"\033[m", "\033[0;2m", "\033[0;38;5;245m", "\033[0;1m", "\033[0;1m",
+     "\033[m"},
     /* inside visual selection — plain reverse video overrides syntax color */
     {"\033[7m", "\033[7m", "\033[7m", "\033[7m", "\033[7m", "\033[7m"},
 };

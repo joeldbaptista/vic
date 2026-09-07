@@ -14,6 +14,7 @@
 #include "session.h"
 
 #include "buffer.h"
+#include "color.h"
 #include "config.h"
 #include "ex.h"
 #include "status.h"
@@ -197,6 +198,26 @@ apply_cli_options(struct editor *g, const struct cli_options *opts)
 	}
 
 	return 0;
+}
+
+void
+apply_filetype_options(struct editor *g, const char *fn)
+{
+	/*
+	 * == Seed the per-file editing options for fn ==
+	 *
+	 * Called from every path that opens a file into the buffer: edit_file()
+	 * for command-line arguments and :n, and colon_do_edit() for :e.  The
+	 * defaults are re-seeded from config.h first, so a file type that
+	 * declares no override (or no colorizer at all) goes back to the global
+	 * default rather than inheriting whatever the previously open file left
+	 * behind.
+	 */
+	const struct colorizer *cz = colorizer_find(fn);
+
+	g->tabstop = CFG_TABSTOP;
+	if (cz && cz->tabstop)
+		g->tabstop = cz->tabstop;
 }
 
 void

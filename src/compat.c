@@ -93,11 +93,20 @@ grow_cap(size_t cap, size_t need, size_t min)
 	 *   need — minimum capacity required after growth
 	 *   min  — starting capacity to use when cap is 0
 	 * Returns: new capacity >= need
+	 *
+	 * A zero cap with a zero min would leave cap at 0 and the doubling
+	 * loop would spin forever, and doubling past SIZE_MAX/2 wraps to 0 and
+	 * does the same.  Several callers pass their own cap as min, which is
+	 * exactly the first shape, so both are guarded here rather than left
+	 * to each call site.
 	 */
 	if (cap == 0)
-		cap = min;
-	while (cap < need)
+		cap = min ? min : 1;
+	while (cap < need) {
+		if (cap > SIZE_MAX / 2)
+			return need;
 		cap *= 2;
+	}
 	return cap;
 }
 

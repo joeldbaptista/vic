@@ -181,7 +181,8 @@ run_trimsel(struct editor *g, int argc, char *argv[],
 	}
 
 	if (start > end) {
-		buffer_replace_range(g, g->mark[MARK_LT], g->mark[MARK_GT], "", 0);
+		buffer_replace_range(g, g->mark[MARK_LT], g->mark[MARK_GT],
+		                     "", 0);
 		return;
 	}
 
@@ -197,7 +198,8 @@ run_trimsel(struct editor *g, int argc, char *argv[],
 			if (!tmp)
 				return;
 			memcpy(tmp, start, (size_t)new_len);
-			buffer_replace_range(g, sel_start, sel_end, tmp, new_len);
+			buffer_replace_range(g, sel_start, sel_end, tmp,
+			                     new_len);
 			free(tmp);
 		}
 	}
@@ -287,7 +289,7 @@ run_sort(struct editor *g, int argc, char *argv[],
 	 * == :run sort [-r] — sort lines in the range lexicographically ==
 	 *
 	 * -r reverses the order.  Splits the range into line_ref structs,
-	 * sorts with qsort(), then rebuilds the region with buffer_replace_range.
+	 * sorts with qsort(), then rebuilds it with buffer_replace_range.
 	 */
 	int reverse = (argc >= 2 && strcmp(argv[1], "-r") == 0);
 	int range_len = (int)(re - rs + 1);
