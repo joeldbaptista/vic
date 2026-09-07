@@ -50,7 +50,7 @@
 #define ESC_NORM_TEXT ESC "[m"
 
 enum {
-	MAX_INPUT_LEN = 128,
+	MAX_INPUT_LEN = PRINT_LITERAL_LEN,
 };
 
 void
@@ -158,18 +158,36 @@ format_edit_status(struct editor *g)
 			break;
 		}
 	}
+	/*
+	 * snprintf returns the length it WOULD have written, so a field wider
+	 * than the space left (a long %F filename, a large %C column on a very
+	 * long line) pushes len past trunc_at even though the bytes were
+	 * truncated.  The loop guard stops on the next iteration, but the
+	 * terminator below is written at buf[len] unconditionally — clamp
+	 * first, or it lands outside status_buffer[STATUS_BUFFER_LEN].
+	 */
+	if (len > trunc_at)
+		len = trunc_at;
 	buf[len] = '\0';
-	return len < trunc_at ? len : trunc_at;
+	return len;
 }
 
 static int
 bufsum(char *buf, int count)
 {
-	int sum = 0;
+	/*
+	 * Position-weighted so that two fields changing in opposite directions
+	 * cannot cancel out.  A plain byte sum aliases: with "%c/%t,%C" the
+	 * line number rising while the column falls (moving from "100/200,2"
+	 * to "101/200,1") leaves the total unchanged, and show_status_line
+	 * then skips the redraw and leaves stale numbers on screen.
+	 */
+	unsigned int sum = 0;
 	char *e = buf + count;
+
 	while (buf < e)
-		sum += (unsigned char)*buf++;
-	return sum;
+		sum = sum * 31u + (unsigned char)*buf++;
+	return (int)(sum & 0x7fffffffu);
 }
 
 void
@@ -231,7 +249,7 @@ status_line_bold_errno(struct editor *g, const char *fn)
 	status_line_bold(g, "'%s': %s", fn, strerror(errno));
 }
 
-static void
+void
 print_literal(char *buf, const char *s)
 {
 	char *d;
