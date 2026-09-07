@@ -240,12 +240,24 @@ apply_undo_stack(struct editor *g, struct undo_object **from_stack,
 	 * The inverse of each applied entry is pushed onto to_stack so the
 	 * operation can be reversed again.  The loop stops at the first
 	 * non-chained entry.
+	 *
+	 * A chained group is stored with the chain flag on every entry except
+	 * the one applied LAST (the deepest in the stack), because the loop
+	 * stops as soon as it applies an unchained entry.  The inverse group
+	 * is pushed in the opposite order, so the flags cannot simply be
+	 * copied across: the inverse of the FIRST entry applied here becomes
+	 * the deepest entry over there and so must be the unchained one, and
+	 * every later inverse must be chained.  Copying the source entry's own
+	 * flag instead leaves the inverse group's top unchained, and replaying
+	 * it applies only one of its entries — for a delete+insert replace
+	 * that means the redo deletes the range and never re-inserts it.
 	 */
 	char *u_start;
 	char *u_end;
 	struct undo_object *undo_entry;
 	struct undo_object *inverse;
 	int chain;
+	int first = 1;
 
 	undo_queue_commit(g);
 
@@ -267,7 +279,7 @@ apply_undo_stack(struct editor *g, struct undo_object **from_stack,
 			text_hole_make(g, u_start, undo_entry->length);
 			memcpy(u_start, undo_entry->undo_text, (size_t)undo_entry->length);
 			inverse = new_undo_entry(
-			    undo_entry->u_type == UNDO_DEL_CHAIN ? UNDO_INS_CHAIN : UNDO_INS,
+			    first ? UNDO_INS : UNDO_INS_CHAIN,
 			    undo_entry->start, undo_entry->length, NULL);
 
 			status_line(g, "%s [%d] %s %d chars at position %d", op_label,
@@ -281,7 +293,7 @@ apply_undo_stack(struct editor *g, struct undo_object **from_stack,
 			u_start = undo_entry->start + g->text;
 			u_end = u_start - 1 + undo_entry->length;
 			inverse = new_undo_entry(
-			    undo_entry->u_type == UNDO_INS_CHAIN ? UNDO_DEL_CHAIN : UNDO_DEL,
+			    first ? UNDO_DEL : UNDO_DEL_CHAIN,
 			    undo_entry->start, undo_entry->length, u_start);
 			text_hole_delete(g, u_start, u_end, NO_UNDO);
 
@@ -319,6 +331,7 @@ apply_undo_stack(struct editor *g, struct undo_object **from_stack,
 
 		if (to_stack && inverse)
 			push_undo_entry(to_stack, inverse);
+		first = 0;
 
 		if (dir < 0)
 			g->modified_count--;
