@@ -72,6 +72,13 @@ check-unit: $(UNIT_TESTS)
 	done; \
 	exit $$failed
 
+CHECKS = check-unit check-star-hash-pty check-regression-pty \
+         check-asan-pty check-ubsan-pty check-sanitizers-pty
+
+check: $(CHECKS)
+
+.PHONY: check $(CHECKS)
+
 frmt:
 	clang-format -i src/*.c src/*.h tools/*.c
 
