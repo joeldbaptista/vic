@@ -98,14 +98,19 @@ Last updated: 2026-09-07.
 
 ## Syntax highlighting
 
-- Automatic on open; driven by file extension.
+- Automatic on open; driven by file name — the extension for most languages, and the
+  base name for Dockerfiles (`Dockerfile`, `Containerfile`, either with a dotted suffix
+  such as `Dockerfile.dev`), which normally carry no extension.
 - C / C++ files (`.c`, `.h`, `.cc`, `.cpp`, `.cxx`, `.hh`, `.hpp`, `.inl`): keywords, types,
   string/character literals, single- and multi-line comments, preprocessor directives, numbers.
+- Dockerfiles: instructions (`FROM`, `RUN`, `COPY`, ...) at the head of a logical line,
+  variable expansions (`$VAR`, `${VAR}`), `#` comments, quoted strings, numbers. A line
+  continued with a trailing backslash does not start a new instruction on the next line.
 - The scheme is monochromatic: tokens are distinguished by SGR attribute (bold, dim, grey),
   not by colour.
 - Opening a file also re-seeds `tabstop` from the file type, overriding the `config.h`
-  default and any earlier `:set tabstop=`. Markdown, Python, shell and SQL use 4; C and
-  C++ use 8; every other file type uses the `config.h` default.
+  default and any earlier `:set tabstop=`. Dockerfile, Markdown, Python, shell and SQL
+  use 4; C and C++ use 8; every other file type uses the `config.h` default.
 
 ## Persistent undo
 
