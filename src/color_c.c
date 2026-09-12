@@ -225,5 +225,6 @@ static const char *const c_extensions[] = {".c", ".h", NULL};
 static const char *const cpp_extensions[] = {
     ".cc", ".cpp", ".cxx", ".hh", ".hpp", ".hxx", ".inl", NULL};
 
-const struct colorizer colorizer_c = {"c", c_extensions, c_colorize, 8};
-const struct colorizer colorizer_cpp = {"cpp", cpp_extensions, cpp_colorize, 8};
+const struct colorizer colorizer_c = {"c", c_extensions, NULL, c_colorize, 8};
+const struct colorizer colorizer_cpp = {
+    "cpp", cpp_extensions, NULL, cpp_colorize, 8};

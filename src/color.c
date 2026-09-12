@@ -1,12 +1,14 @@
 /*
- * color.c - colorizer registry and extension lookup.
+ * color.c - colorizer registry and file-name lookup.
  *
- * colorizer_find extracts the dot-extension from a filename and does
- * a linear scan through colorizer_table.  The table is short (one entry
- * per supported language), so the scan is O(n) on extensions, not files.
+ * colorizer_find reduces a path to its base name and does a linear scan
+ * through colorizer_table, matching on the dot-extension and on the base
+ * name itself.  The table is short (one entry per supported language), so
+ * the scan is O(n) on names, not files.
  *
  * To add a new language colorizer: declare it extern and add its address
- * to colorizer_table[].
+ * to colorizer_table[].  A colorizer may match on extensions, on base
+ * names, or on both.
  */
 #include "color.h"
 #include <ctype.h>
@@ -19,6 +21,7 @@ extern const struct colorizer colorizer_sh;
 extern const struct colorizer colorizer_md;
 extern const struct colorizer colorizer_sql;
 extern const struct colorizer colorizer_py;
+extern const struct colorizer colorizer_docker;
 
 static const struct colorizer *const colorizer_table[] = {
     &colorizer_c,
@@ -27,6 +30,7 @@ static const struct colorizer *const colorizer_table[] = {
     &colorizer_md,
     &colorizer_sql,
     &colorizer_py,
+    &colorizer_docker,
     NULL,
 };
 
@@ -48,31 +52,63 @@ ext_match(const char *a, const char *b)
 	return *a == '\0' && *b == '\0';
 }
 
+static int
+base_match(const char *base, const char *name)
+{
+	/*
+	 * == Case-insensitive match of a file base name against a table entry ==
+	 *
+	 * Returns 1 when base is name ("Dockerfile"), or name followed by a
+	 * dotted suffix ("Dockerfile.dev"); 0 otherwise.  The second form is
+	 * how a project distinguishes several Dockerfiles in one directory.
+	 */
+	while (*base && *name) {
+		if (tolower((unsigned char)*base) != tolower((unsigned char)*name))
+			return 0;
+		base++;
+		name++;
+	}
+	if (*name)
+		return 0;
+	return *base == '\0' || *base == '.';
+}
+
 const struct colorizer *
 colorizer_find(const char *filename)
 {
 	/*
-	 * == Find the colorizer for a file, based on its extension ==
+	 * == Find the colorizer for a file, based on its name ==
 	 *
-	 * Extracts the last '.' component of filename and does a linear scan
-	 * through colorizer_table, testing each colorizer's extensions[] list.
-	 * Returns a pointer to the matching colorizer, or NULL if none matches
-	 * or filename has no extension.
+	 * Strips any directory prefix, then does a linear scan through
+	 * colorizer_table.  Each colorizer is tested twice: its extensions[]
+	 * list against the last '.' component of the base name, and its
+	 * basenames[] list against the whole base name (a Dockerfile normally
+	 * has no extension to match on).  Returns the matching colorizer, or
+	 * NULL when nothing matches.
 	 */
-	const char *ext;
+	const char *base, *slash, *ext;
 	int i;
 
 	if (!filename)
 		return NULL;
-	ext = strrchr(filename, '.');
-	if (!ext)
-		return NULL;
+	slash = strrchr(filename, '/');
+	base = slash ? slash + 1 : filename;
+	ext = strrchr(base, '.');
 
 	for (i = 0; colorizer_table[i]; i++) {
 		const char *const *e;
-		for (e = colorizer_table[i]->extensions; *e; e++) {
-			if (ext_match(ext, *e))
-				return colorizer_table[i];
+
+		if (ext) {
+			for (e = colorizer_table[i]->extensions; *e; e++) {
+				if (ext_match(ext, *e))
+					return colorizer_table[i];
+			}
+		}
+		if (colorizer_table[i]->basenames) {
+			for (e = colorizer_table[i]->basenames; *e; e++) {
+				if (base_match(base, *e))
+					return colorizer_table[i];
+			}
 		}
 	}
 	return NULL;

@@ -43,13 +43,17 @@ struct colorizer {
 	const char *name;
 	const char *const
 	    *extensions; /* NULL-terminated list, e.g. {".c",".h",NULL} */
+	const char *const
+	    *basenames; /* NULL-terminated list, e.g. {"Dockerfile",NULL}; may be NULL */
 	colorize_fn colorize;
 	int tabstop; /* 0 = use global default */
 };
 
 /*
  * colorizer_find - return the colorizer for filename, or NULL.
- * Matches on the final '.' extension, case-insensitively.
+ * Matches the final '.' extension against extensions[], and the whole base
+ * name against basenames[] (also accepting a dotted suffix after the entry,
+ * so "Dockerfile.dev" matches "Dockerfile").  Both tests ignore case.
  */
 const struct colorizer *colorizer_find(const char *filename);
 

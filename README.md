@@ -162,14 +162,17 @@ Cursor shape values: `0` terminal default, `1` blinking block, `2` block,
 
 `tabstop` is re-seeded from the file type every time a file is opened, so
 the default above applies only to file types that declare no width of their
-own. Markdown, Python, shell and SQL files use 4; C and C++ files use 8. A
-`:set tabstop=N` therefore lasts until the next file is opened.
+own. Dockerfile, Markdown, Python, shell and SQL files use 4; C and C++
+files use 8. A `:set tabstop=N` therefore lasts until the next file is
+opened.
 
 ### Syntax highlighting
 
-Highlighting is activated automatically by file extension. The scheme is
-monochromatic: tokens are distinguished by SGR attribute rather than by
-colour, so it reads the same on any background.
+Highlighting is activated automatically by file name: by the extension for
+most languages, and by the base name for Dockerfiles, which usually carry
+no extension at all. The scheme is monochromatic: tokens are distinguished
+by SGR attribute rather than by colour, so it reads the same on any
+background.
 
 | Token | Rendering |
 |-------|-----------|
@@ -179,15 +182,17 @@ colour, so it reads the same on any background.
 | comment | dim |
 | number | normal |
 
-Languages and extensions:
+Languages and names:
 
-| Language | Extensions |
-|----------|------------|
+| Language | Names |
+|----------|-------|
 | C | `.c` `.h` |
 | C++ | `.cc` `.cpp` `.cxx` `.hh` `.hpp` `.hxx` `.inl` |
 | Shell | `.sh` `.bash` `.zsh` `.ksh` |
 | Markdown | `.md` `.markdown` `.mkd` `.mdwn` `.mdown` |
 | SQL | `.sql` |
+| Python | `.py` `.pyw` |
+| Dockerfile | `Dockerfile`, `Containerfile`, either with a dotted suffix (`Dockerfile.dev`), `.dockerfile`, `.containerfile` |
 
 ## Design
 
@@ -254,6 +259,8 @@ color_c.c       C/C++ colorizer
 color_sh.c      shell colorizer
 color_md.c      Markdown colorizer
 color_sql.c     SQL colorizer
+color_py.c      Python colorizer
+color_docker.c  Dockerfile colorizer
 ```
 
 ## Multiple files and tmux

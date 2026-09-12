@@ -222,4 +222,4 @@ inline_scan:
 static const char *const md_extensions[] = {
     ".md", ".markdown", ".mkd", ".mdwn", ".mdown", NULL};
 
-const struct colorizer colorizer_md = {"md", md_extensions, md_colorize, 4};
+const struct colorizer colorizer_md = {"md", md_extensions, NULL, md_colorize, 4};

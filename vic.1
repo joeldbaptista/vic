@@ -477,11 +477,13 @@ Highlighting is visual-only: it does not move the cursor or affect the buffer.
 :run echo \fIargs\fR    print arguments to status bar (no range effect)
 .fi
 .SH SYNTAX HIGHLIGHTING
-Highlighting activates automatically based on file extension.
+Highlighting activates automatically based on the file name: on the
+extension for most languages, and on the base name for Dockerfiles, which
+normally carry no extension.
 The following is an exhaustive list of supported languages.
 .TS
 l l.
-Language	Extensions
+Language	Names
 _
 C	\fB.c\fR \fB.h\fR
 C++	\fB.cc\fR \fB.cpp\fR \fB.cxx\fR \fB.hpp\fR \fB.hh\fR \fB.hxx\fR
@@ -489,7 +491,11 @@ Shell	\fB.sh\fR
 Markdown	\fB.md\fR
 SQL	\fB.sql\fR
 Python	\fB.py\fR
+Dockerfile	\fBDockerfile\fR \fBContainerfile\fR \fB.dockerfile\fR
 .TE
+.PP
+A Dockerfile base name also matches with a dotted suffix, as in
+\fBDockerfile.dev\fR.
 .PP
 Highlighted elements include (non-exhaustive): keywords, numbers, strings,
 comments, preprocessor directives (C/C++), and decorators (Python).

@@ -64,6 +64,21 @@ is_bol(const char *line, int i)
 }
 
 static int
+line_cont_state(const struct lang_spec *spec, const char *line, int len)
+{
+	/*
+	 * == State to carry into the next line after a plain line ==
+	 *
+	 * Only keywords_bol languages track this: a trailing backslash makes
+	 * the next line a continuation of this one, and a keyword may not open
+	 * a continuation line.  Every other language returns CS_NORMAL.
+	 */
+	if (spec->keywords_bol && len > 0 && line[len - 1] == '\\')
+		return CS_LINE_CONT;
+	return CS_NORMAL;
+}
+
+static int
 starts_with(const char *line, int len, int i, const char *s)
 {
 	/*
@@ -391,8 +406,14 @@ colorize_generic(int state, const char *line, int len, char *attrs,
 	 * struct lang_spec fields.
 	 */
 	int i = 0;
+	int kw_ok = 1;
 
 	fill_attrs(attrs, 0, len, ATTR_NORMAL);
+
+	if (spec->keywords_bol && state == CS_LINE_CONT) {
+		kw_ok = 0;
+		state = CS_NORMAL;
+	}
 
 	if (spec->block_open && (state == CS_BLOCK_CMT || state == CS_BLOCK_CMT_STAR)) {
 		int new_state;
@@ -504,7 +525,8 @@ normal:
 
 			while (i < len && is_ident((unsigned char)line[i]))
 				i++;
-			if (keyword_lookup(line + start, i - start, spec->keywords,
+			if ((!spec->keywords_bol || (kw_ok && is_bol(line, start))) &&
+			    keyword_lookup(line + start, i - start, spec->keywords,
 			                    spec->keywords_ci))
 				fill_attrs(attrs, start, i, ATTR_KEYWORD);
 			continue;
@@ -513,5 +535,5 @@ normal:
 		i++;
 	}
 
-	return CS_NORMAL;
+	return line_cont_state(spec, line, len);
 }

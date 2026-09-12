@@ -7,17 +7,17 @@ UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
 	CFLAGS += -D_DARWIN_C_SOURCE
 endif
- vic: src/vic.c src/utf8.c src/compat.c src/term.c src/input.c src/undo.c src/search.c src/screen.c src/motion.c src/operator.c src/editcmd.c src/textobj.c src/range.c src/scan.c src/visual.c src/wordmotion.c src/buffer.c src/session.c src/excore.c src/ex.c src/line.c src/codepoint.c src/context.c src/status.c src/color.c src/color_generic.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/run.c src/parser.c src/regex.c
-	$(CC) $(CFLAGS) -o vic src/vic.c src/utf8.c src/compat.c src/term.c src/input.c src/undo.c src/search.c src/screen.c src/motion.c src/operator.c src/editcmd.c src/textobj.c src/range.c src/scan.c src/visual.c src/wordmotion.c src/buffer.c src/session.c src/excore.c src/ex.c src/line.c src/codepoint.c src/context.c src/status.c src/color.c src/color_generic.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/run.c src/parser.c src/regex.c
+ vic: src/vic.c src/utf8.c src/compat.c src/term.c src/input.c src/undo.c src/search.c src/screen.c src/motion.c src/operator.c src/editcmd.c src/textobj.c src/range.c src/scan.c src/visual.c src/wordmotion.c src/buffer.c src/session.c src/excore.c src/ex.c src/line.c src/codepoint.c src/context.c src/status.c src/color.c src/color_generic.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_docker.c src/run.c src/parser.c src/regex.c
+	$(CC) $(CFLAGS) -o vic src/vic.c src/utf8.c src/compat.c src/term.c src/input.c src/undo.c src/search.c src/screen.c src/motion.c src/operator.c src/editcmd.c src/textobj.c src/range.c src/scan.c src/visual.c src/wordmotion.c src/buffer.c src/session.c src/excore.c src/ex.c src/line.c src/codepoint.c src/context.c src/status.c src/color.c src/color_generic.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_docker.c src/run.c src/parser.c src/regex.c
 
-vic-static: src/vic.c src/utf8.c src/compat.c src/term.c src/input.c src/undo.c src/search.c src/screen.c src/motion.c src/operator.c src/editcmd.c src/textobj.c src/range.c src/scan.c src/visual.c src/wordmotion.c src/buffer.c src/session.c src/excore.c src/ex.c src/line.c src/codepoint.c src/context.c src/status.c src/color.c src/color_generic.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/run.c src/parser.c src/regex.c
-	$(CC) $(CFLAGS) -static -o vic-static src/vic.c src/utf8.c src/compat.c src/term.c src/input.c src/undo.c src/search.c src/screen.c src/motion.c src/operator.c src/editcmd.c src/textobj.c src/range.c src/scan.c src/visual.c src/wordmotion.c src/buffer.c src/session.c src/excore.c src/ex.c src/line.c src/codepoint.c src/context.c src/status.c src/color.c src/color_generic.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/run.c src/parser.c src/regex.c
+vic-static: src/vic.c src/utf8.c src/compat.c src/term.c src/input.c src/undo.c src/search.c src/screen.c src/motion.c src/operator.c src/editcmd.c src/textobj.c src/range.c src/scan.c src/visual.c src/wordmotion.c src/buffer.c src/session.c src/excore.c src/ex.c src/line.c src/codepoint.c src/context.c src/status.c src/color.c src/color_generic.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_docker.c src/run.c src/parser.c src/regex.c
+	$(CC) $(CFLAGS) -static -o vic-static src/vic.c src/utf8.c src/compat.c src/term.c src/input.c src/undo.c src/search.c src/screen.c src/motion.c src/operator.c src/editcmd.c src/textobj.c src/range.c src/scan.c src/visual.c src/wordmotion.c src/buffer.c src/session.c src/excore.c src/ex.c src/line.c src/codepoint.c src/context.c src/status.c src/color.c src/color_generic.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_docker.c src/run.c src/parser.c src/regex.c
 
-vic-asan: src/vic.c src/utf8.c src/compat.c src/term.c src/input.c src/undo.c src/search.c src/screen.c src/motion.c src/operator.c src/editcmd.c src/textobj.c src/range.c src/scan.c src/visual.c src/wordmotion.c src/buffer.c src/session.c src/excore.c src/ex.c src/line.c src/codepoint.c src/context.c src/status.c src/color.c src/color_generic.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/run.c src/parser.c src/regex.c
-	$(CC) $(SAN_COMMON) -fsanitize=address -o vic-asan src/vic.c src/utf8.c src/compat.c src/term.c src/input.c src/undo.c src/search.c src/screen.c src/motion.c src/operator.c src/editcmd.c src/textobj.c src/range.c src/scan.c src/visual.c src/wordmotion.c src/buffer.c src/session.c src/excore.c src/ex.c src/line.c src/codepoint.c src/context.c src/status.c src/color.c src/color_generic.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/run.c src/parser.c src/regex.c
+vic-asan: src/vic.c src/utf8.c src/compat.c src/term.c src/input.c src/undo.c src/search.c src/screen.c src/motion.c src/operator.c src/editcmd.c src/textobj.c src/range.c src/scan.c src/visual.c src/wordmotion.c src/buffer.c src/session.c src/excore.c src/ex.c src/line.c src/codepoint.c src/context.c src/status.c src/color.c src/color_generic.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_docker.c src/run.c src/parser.c src/regex.c
+	$(CC) $(SAN_COMMON) -fsanitize=address -o vic-asan src/vic.c src/utf8.c src/compat.c src/term.c src/input.c src/undo.c src/search.c src/screen.c src/motion.c src/operator.c src/editcmd.c src/textobj.c src/range.c src/scan.c src/visual.c src/wordmotion.c src/buffer.c src/session.c src/excore.c src/ex.c src/line.c src/codepoint.c src/context.c src/status.c src/color.c src/color_generic.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_docker.c src/run.c src/parser.c src/regex.c
 
-vic-ubsan: src/vic.c src/utf8.c src/compat.c src/term.c src/input.c src/undo.c src/search.c src/screen.c src/motion.c src/operator.c src/editcmd.c src/textobj.c src/range.c src/scan.c src/visual.c src/wordmotion.c src/buffer.c src/session.c src/excore.c src/ex.c src/line.c src/codepoint.c src/context.c src/status.c src/color.c src/color_generic.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/run.c src/parser.c src/regex.c
-	$(CC) $(SAN_COMMON) -fsanitize=undefined -o vic-ubsan src/vic.c src/utf8.c src/compat.c src/term.c src/input.c src/undo.c src/search.c src/screen.c src/motion.c src/operator.c src/editcmd.c src/textobj.c src/range.c src/scan.c src/visual.c src/wordmotion.c src/buffer.c src/session.c src/excore.c src/ex.c src/line.c src/codepoint.c src/context.c src/status.c src/color.c src/color_generic.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/run.c src/parser.c src/regex.c
+vic-ubsan: src/vic.c src/utf8.c src/compat.c src/term.c src/input.c src/undo.c src/search.c src/screen.c src/motion.c src/operator.c src/editcmd.c src/textobj.c src/range.c src/scan.c src/visual.c src/wordmotion.c src/buffer.c src/session.c src/excore.c src/ex.c src/line.c src/codepoint.c src/context.c src/status.c src/color.c src/color_generic.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_docker.c src/run.c src/parser.c src/regex.c
+	$(CC) $(SAN_COMMON) -fsanitize=undefined -o vic-ubsan src/vic.c src/utf8.c src/compat.c src/term.c src/input.c src/undo.c src/search.c src/screen.c src/motion.c src/operator.c src/editcmd.c src/textobj.c src/range.c src/scan.c src/visual.c src/wordmotion.c src/buffer.c src/session.c src/excore.c src/ex.c src/line.c src/codepoint.c src/context.c src/status.c src/color.c src/color_generic.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_docker.c src/run.c src/parser.c src/regex.c
 
 tools/check-pty: tools/check-pty.c
 	$(CC) -std=c99 -D_POSIX_C_SOURCE=200809L -D_XOPEN_SOURCE=700 \
@@ -39,7 +39,8 @@ check-sanitizers-pty: check-asan-pty check-ubsan-pty
 
 UNIT_TESTS = tests/test_utf8 tests/test_line tests/test_codepoint \
              tests/test_color_c tests/test_color_py \
-             tests/test_color_sh tests/test_color_md tests/test_color_sql
+             tests/test_color_sh tests/test_color_md tests/test_color_sql \
+             tests/test_color_docker
 
 tests/test_utf8: tests/test_utf8.c src/utf8.c
 	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_utf8.c src/utf8.c
@@ -64,6 +65,11 @@ tests/test_color_md: tests/test_color_md.c src/color_md.c
 
 tests/test_color_sql: tests/test_color_sql.c src/color_sql.c src/color_generic.c
 	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_sql.c src/color_sql.c src/color_generic.c
+
+# The Dockerfile test also exercises colorizer_find(), so it links the whole
+# registry rather than one colorizer.
+tests/test_color_docker: tests/test_color_docker.c src/color_docker.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_generic.c
+	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_docker.c src/color_docker.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_generic.c
 
 check-unit: $(UNIT_TESTS)
 	@failed=0; \
