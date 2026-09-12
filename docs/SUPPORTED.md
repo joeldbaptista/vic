@@ -2,7 +2,7 @@
 
 This file defines the supported behavior contract for this project.
 
-Last updated: 2026-09-07.
+Last updated: 2026-09-12.
 
 ## Scope of support
 
@@ -103,14 +103,21 @@ Last updated: 2026-09-07.
   such as `Dockerfile.dev`), which normally carry no extension.
 - C / C++ files (`.c`, `.h`, `.cc`, `.cpp`, `.cxx`, `.hh`, `.hpp`, `.inl`): keywords, types,
   string/character literals, single- and multi-line comments, preprocessor directives, numbers.
+- YAML files (`.yaml`, `.yml`): mapping keys (plain or quoted), `#` comments, quoted
+  scalars, block scalars (`|`, `>`, including their bodies across lines), anchors
+  (`&a`), aliases (`*a`), tags (`!!str`), document markers (`---`, `...`), directives
+  (`%YAML 1.2`), numbers, and the constants `true`, `false`, `null`, `yes`, `no`, `on`,
+  `off` and `~`. Multi-line plain scalars and multi-line flow collections are not
+  tracked across lines, so a key is only recognised at the head of a line.
 - Dockerfiles: instructions (`FROM`, `RUN`, `COPY`, ...) at the head of a logical line,
   variable expansions (`$VAR`, `${VAR}`), `#` comments, quoted strings, numbers. A line
   continued with a trailing backslash does not start a new instruction on the next line.
 - The scheme is monochromatic: tokens are distinguished by SGR attribute (bold, dim, grey),
   not by colour.
 - Opening a file also re-seeds `tabstop` from the file type, overriding the `config.h`
-  default and any earlier `:set tabstop=`. Dockerfile, Markdown, Python, shell and SQL
-  use 4; C and C++ use 8; every other file type uses the `config.h` default.
+  default and any earlier `:set tabstop=`. YAML uses 2; Dockerfile, Markdown, Python,
+  shell and SQL use 4; C and C++ use 8; every other file type uses the `config.h`
+  default.
 
 ## Persistent undo
 

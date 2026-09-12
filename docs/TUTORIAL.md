@@ -537,6 +537,7 @@ Highlighting activates automatically based on file extension.
 | Markdown | `.md`                                   |
 | SQL      | `.sql`                                  |
 | Python   | `.py`                                   |
+| YAML     | `.yaml` `.yml`                          |
 
 Highlighted elements vary by language but include:
 - **Keywords** — language reserved words
@@ -545,6 +546,7 @@ Highlighted elements vary by language but include:
 - **Comments** — line and block comments
 - **Preprocessor** — `#include`, `#define`, etc. (C/C++)
 - **Decorators** — `@name` (Python)
+- **Mapping keys, anchors, aliases and block scalars** — (YAML)
 
 ---
 

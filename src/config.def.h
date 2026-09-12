@@ -18,8 +18,8 @@
 #define CFG_FLASH 0          /* fl   — flash the screen instead of beeping */
 #define CFG_IGNORECASE 0     /* ic   — case-insensitive search */
 #define CFG_SHOWMATCH 0      /* sm   — briefly jump to a matching bracket */
-#define CFG_NUMBER 0         /* nu   — show line numbers */
-#define CFG_RELATIVENUMBER 0 /* rnu  — show relative line numbers */
+#define CFG_NUMBER 1         /* nu   — show line numbers */
+#define CFG_RELATIVENUMBER 1 /* rnu  — show relative line numbers */
 #define CFG_UNDOFILE 0       /* uf   — persist undo history to disk */
 #define CFG_SYNTAX 0         /* syn  — syntax highlighting */
 

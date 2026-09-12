@@ -22,6 +22,7 @@ extern const struct colorizer colorizer_md;
 extern const struct colorizer colorizer_sql;
 extern const struct colorizer colorizer_py;
 extern const struct colorizer colorizer_docker;
+extern const struct colorizer colorizer_yaml;
 
 static const struct colorizer *const colorizer_table[] = {
     &colorizer_c,
@@ -31,6 +32,7 @@ static const struct colorizer *const colorizer_table[] = {
     &colorizer_sql,
     &colorizer_py,
     &colorizer_docker,
+    &colorizer_yaml,
     NULL,
 };
 

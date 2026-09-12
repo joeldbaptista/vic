@@ -492,13 +492,15 @@ Markdown	\fB.md\fR
 SQL	\fB.sql\fR
 Python	\fB.py\fR
 Dockerfile	\fBDockerfile\fR \fBContainerfile\fR \fB.dockerfile\fR
+YAML	\fB.yaml\fR \fB.yml\fR
 .TE
 .PP
 A Dockerfile base name also matches with a dotted suffix, as in
 \fBDockerfile.dev\fR.
 .PP
 Highlighted elements include (non-exhaustive): keywords, numbers, strings,
-comments, preprocessor directives (C/C++), and decorators (Python).
+comments, preprocessor directives (C/C++), decorators (Python), and mapping
+keys, anchors, aliases and block scalars (YAML).
 .SH STARTUP CONFIGURATION
 On startup,
 .B vic
