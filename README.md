@@ -162,9 +162,9 @@ Cursor shape values: `0` terminal default, `1` blinking block, `2` block,
 
 `tabstop` is re-seeded from the file type every time a file is opened, so
 the default above applies only to file types that declare no width of their
-own. YAML files use 2; Dockerfile, Markdown, Python, shell and SQL files
-use 4; C and C++ files use 8. A `:set tabstop=N` therefore lasts until the
-next file is opened.
+own. Terraform and YAML files use 2; Dockerfile, Markdown, Python, shell
+and SQL files use 4; C and C++ files use 8. A `:set tabstop=N` therefore
+lasts until the next file is opened.
 
 ### Syntax highlighting
 
@@ -194,6 +194,7 @@ Languages and names:
 | Python | `.py` `.pyw` |
 | Dockerfile | `Dockerfile`, `Containerfile`, either with a dotted suffix (`Dockerfile.dev`), `.dockerfile`, `.containerfile` |
 | YAML | `.yaml` `.yml` |
+| Terraform (HCL) | `.tf` `.tfvars` `.hcl` |
 
 ## Design
 
@@ -263,6 +264,7 @@ color_sql.c     SQL colorizer
 color_py.c      Python colorizer
 color_docker.c  Dockerfile colorizer
 color_yaml.c    YAML colorizer
+color_tf.c      Terraform (HCL) colorizer
 ```
 
 ## Multiple files and tmux
