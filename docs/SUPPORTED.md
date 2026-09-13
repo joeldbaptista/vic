@@ -2,7 +2,7 @@
 
 This file defines the supported behavior contract for this project.
 
-Last updated: 2026-09-12.
+Last updated: 2026-09-14.
 
 ## Scope of support
 
@@ -109,15 +109,23 @@ Last updated: 2026-09-12.
   (`%YAML 1.2`), numbers, and the constants `true`, `false`, `null`, `yes`, `no`, `on`,
   `off` and `~`. Multi-line plain scalars and multi-line flow collections are not
   tracked across lines, so a key is only recognised at the head of a line.
+- Terraform / HCL files (`.tf`, `.tfvars`, `.hcl`): block types (`resource`, `variable`,
+  `module`, ...), named values (`var`, `local`, `each`, `count`, `path`, `self`),
+  meta-arguments (`for_each`, `depends_on`, `lifecycle`, ...), the expression words
+  (`for`, `in`, `if`, `else`), the constants `true`, `false` and `null`, `#` and `//`
+  comments, block comments spanning lines, quoted strings with `${...}` interpolation,
+  and decimal numbers. A here-document (`<<EOT`) is not tracked across lines, so its
+  body is coloured as though it were HCL code; a template directive (`%{ if ... }`) is
+  not highlighted.
 - Dockerfiles: instructions (`FROM`, `RUN`, `COPY`, ...) at the head of a logical line,
   variable expansions (`$VAR`, `${VAR}`), `#` comments, quoted strings, numbers. A line
   continued with a trailing backslash does not start a new instruction on the next line.
 - The scheme is monochromatic: tokens are distinguished by SGR attribute (bold, dim, grey),
   not by colour.
 - Opening a file also re-seeds `tabstop` from the file type, overriding the `config.h`
-  default and any earlier `:set tabstop=`. YAML uses 2; Dockerfile, Markdown, Python,
-  shell and SQL use 4; C and C++ use 8; every other file type uses the `config.h`
-  default.
+  default and any earlier `:set tabstop=`. Terraform and YAML use 2; Dockerfile,
+  Markdown, Python, shell and SQL use 4; C and C++ use 8; every other file type uses
+  the `config.h` default.
 
 ## Persistent undo
 

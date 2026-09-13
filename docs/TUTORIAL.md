@@ -538,6 +538,7 @@ Highlighting activates automatically based on file extension.
 | SQL      | `.sql`                                  |
 | Python   | `.py`                                   |
 | YAML     | `.yaml` `.yml`                          |
+| Terraform| `.tf` `.tfvars` `.hcl`                  |
 
 Highlighted elements vary by language but include:
 - **Keywords** — language reserved words
@@ -547,6 +548,7 @@ Highlighted elements vary by language but include:
 - **Preprocessor** — `#include`, `#define`, etc. (C/C++)
 - **Decorators** — `@name` (Python)
 - **Mapping keys, anchors, aliases and block scalars** — (YAML)
+- **Block types, named values and `${...}` interpolation** — (Terraform)
 
 ---
 

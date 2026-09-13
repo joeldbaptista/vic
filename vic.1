@@ -493,14 +493,19 @@ SQL	\fB.sql\fR
 Python	\fB.py\fR
 Dockerfile	\fBDockerfile\fR \fBContainerfile\fR \fB.dockerfile\fR
 YAML	\fB.yaml\fR \fB.yml\fR
+Terraform	\fB.tf\fR \fB.tfvars\fR \fB.hcl\fR
 .TE
 .PP
 A Dockerfile base name also matches with a dotted suffix, as in
 \fBDockerfile.dev\fR.
 .PP
 Highlighted elements include (non-exhaustive): keywords, numbers, strings,
-comments, preprocessor directives (C/C++), decorators (Python), and mapping
-keys, anchors, aliases and block scalars (YAML).
+comments, preprocessor directives (C/C++), decorators (Python), mapping
+keys, anchors, aliases and block scalars (YAML), and block types, named
+values and
+.B ${...}
+interpolation (Terraform).  A Terraform here-document is not tracked across
+lines, so its body is coloured as though it were HCL code.
 .SH STARTUP CONFIGURATION
 On startup,
 .B vic
