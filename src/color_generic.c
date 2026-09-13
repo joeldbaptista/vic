@@ -483,7 +483,10 @@ normal:
 			continue;
 		}
 
-		if (spec->line_comment && starts_with(line, len, i, spec->line_comment)) {
+		if ((spec->line_comment &&
+		     starts_with(line, len, i, spec->line_comment)) ||
+		    (spec->line_comment2 &&
+		     starts_with(line, len, i, spec->line_comment2))) {
 			fill_attrs(attrs, i, len, ATTR_COMMENT);
 			return CS_NORMAL;
 		}

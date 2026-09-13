@@ -1,10 +1,10 @@
 /*
  * color_generic.h - table-driven syntax colorizer engine.
  *
- * Shared by color_c.c, color_py.c, color_sh.c, color_sql.c, and
- * color_docker.c.  Each of those files owns only its keyword table(s) and
- * a static struct lang_spec describing its syntax; colorize_generic() does
- * the actual scanning.
+ * Shared by color_c.c, color_py.c, color_sh.c, color_sql.c, color_docker.c,
+ * and color_tf.c.  Each of those files owns only its keyword table(s) and a
+ * static struct lang_spec describing its syntax; colorize_generic() does the
+ * actual scanning.
  *
  * Cross-line state is a plain int, same as the colorize_fn contract in
  * color.h.  Each language's state values are only ever fed back into its
@@ -51,6 +51,7 @@ struct lang_spec {
 	int keywords_bol;               /* keywords only count as the first token of a logical line */
 
 	const char *line_comment;       /* e.g. "//", "#", "--"; NULL = none */
+	const char *line_comment2;      /* second lead-in, e.g. "#" beside "//"; NULL = none */
 	const char *block_open;         /* opening delimiter, e.g. slash-star; NULL = none */
 	const char *block_close;        /* closing delimiter, e.g. star-slash; required if block_open is set */
 
