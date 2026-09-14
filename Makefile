@@ -107,13 +107,15 @@ frmt:
 index:
 	grep -n -E '^[a-zA-Z][a-zA-Z0-9_]+\(' src/*.c > functions.idx
 
+PREFIX=/usr/local
+
 install: clean vic install-man
-	mv vic /usr/bin/vic
-	chmod a+x /usr/bin/vic
+	mkdir -p $(PREFIX)/bin
+	install -m 755 vic $(PREFIX)/bin/vic
 
 install-man: vic.1
-	mkdir -p /usr/local/share/man/man1
-	cp vic.1 /usr/local/share/man/man1/vic.1
+	mkdir -p $(PREFIX)/share/man/man1
+	cp vic.1 $(PREFIX)/share/man/man1/vic.1
 
 deploy:
 	rsync -av --include='src/***' --include='data/***' --include='tools/***' \
