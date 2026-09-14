@@ -527,7 +527,9 @@ Examples:
 
 ## Syntax Highlighting
 
-Highlighting activates automatically based on file extension.
+Highlighting activates automatically based on the file name: on the
+extension for most languages, and on the base name for Dockerfiles and
+makefiles, which normally carry no extension.
 
 | Language | Extensions                              |
 |----------|-----------------------------------------|
@@ -539,6 +541,7 @@ Highlighting activates automatically based on file extension.
 | Python   | `.py`                                   |
 | YAML     | `.yaml` `.yml`                          |
 | Terraform| `.tf` `.tfvars` `.hcl`                  |
+| Make     | `Makefile` `GNUmakefile` `.mk` `.inc`   |
 
 Highlighted elements vary by language but include:
 - **Keywords** — language reserved words
@@ -549,6 +552,7 @@ Highlighted elements vary by language but include:
 - **Decorators** — `@name` (Python)
 - **Mapping keys, anchors, aliases and block scalars** — (YAML)
 - **Block types, named values and `${...}` interpolation** — (Terraform)
+- **Targets, directives, variable references and recipe prefixes** — (make)
 
 ---
 

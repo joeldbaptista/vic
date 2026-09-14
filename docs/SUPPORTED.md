@@ -100,7 +100,9 @@ Last updated: 2026-09-14.
 
 - Automatic on open; driven by file name — the extension for most languages, and the
   base name for Dockerfiles (`Dockerfile`, `Containerfile`, either with a dotted suffix
-  such as `Dockerfile.dev`), which normally carry no extension.
+  such as `Dockerfile.dev`) and makefiles (`Makefile`, `GNUmakefile`, `BSDmakefile`,
+  likewise with a dotted suffix such as `Makefile.am`), which normally carry no
+  extension.
 - C / C++ files (`.c`, `.h`, `.cc`, `.cpp`, `.cxx`, `.hh`, `.hpp`, `.inl`): keywords, types,
   string/character literals, single- and multi-line comments, preprocessor directives, numbers.
 - YAML files (`.yaml`, `.yml`): mapping keys (plain or quoted), `#` comments, quoted
@@ -117,6 +119,19 @@ Last updated: 2026-09-14.
   and decimal numbers. A here-document (`<<EOT`) is not tracked across lines, so its
   body is coloured as though it were HCL code; a template directive (`%{ if ... }`) is
   not highlighted.
+- Makefiles (also `.mk`, `.mak`, `.make`, `.inc`): directives (`include`, `ifeq`, `define`, ...)
+  and the variable each one names, the target list of a rule (including a pattern rule
+  and a double-colon rule), the variable name on the left of an assignment (`=`, `:=`,
+  `::=`, `?=`, `+=`, `!=`) and of a target-specific assignment, variable references
+  (`$(CC)`, `${CC}`, the automatic `$@` and `$<`, the escaped `$$`, and nested forms
+  such as `$(patsubst %.c,%.o,$(SRC))`), the recipe prefixes `@`, `-` and `+`, quoted
+  text, `#` comments, and decimal numbers. A line continued with a trailing backslash
+  is scanned as a continuation, so it opens no target and no directive, and a continued
+  comment stays a comment. A tab-indented line is a recipe only once a rule is in
+  effect, which is how make itself reads it, so a tab-indented assignment inside a
+  conditional at the head of the file is coloured as an assignment. The body of a
+  recipe is scanned as makefile text rather than as shell, because the shell is
+  chosen by the makefile (`SHELL = ...`) and so is not fixed.
 - Dockerfiles: instructions (`FROM`, `RUN`, `COPY`, ...) at the head of a logical line,
   variable expansions (`$VAR`, `${VAR}`), `#` comments, quoted strings, numbers. A line
   continued with a trailing backslash does not start a new instruction on the next line.
@@ -124,8 +139,8 @@ Last updated: 2026-09-14.
   not by colour.
 - Opening a file also re-seeds `tabstop` from the file type, overriding the `config.h`
   default and any earlier `:set tabstop=`. Terraform and YAML use 2; Dockerfile,
-  Markdown, Python, shell and SQL use 4; C and C++ use 8; every other file type uses
-  the `config.h` default.
+  Markdown, Python, shell and SQL use 4; C, C++ and makefiles use 8; every other file
+  type uses the `config.h` default.
 
 ## Persistent undo
 

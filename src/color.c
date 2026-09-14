@@ -24,6 +24,7 @@ extern const struct colorizer colorizer_py;
 extern const struct colorizer colorizer_docker;
 extern const struct colorizer colorizer_yaml;
 extern const struct colorizer colorizer_tf;
+extern const struct colorizer colorizer_make;
 
 static const struct colorizer *const colorizer_table[] = {
     &colorizer_c,
@@ -35,6 +36,7 @@ static const struct colorizer *const colorizer_table[] = {
     &colorizer_docker,
     &colorizer_yaml,
     &colorizer_tf,
+    &colorizer_make,
     NULL,
 };
 

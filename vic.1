@@ -478,8 +478,8 @@ Highlighting is visual-only: it does not move the cursor or affect the buffer.
 .fi
 .SH SYNTAX HIGHLIGHTING
 Highlighting activates automatically based on the file name: on the
-extension for most languages, and on the base name for Dockerfiles, which
-normally carry no extension.
+extension for most languages, and on the base name for Dockerfiles and
+makefiles, which normally carry no extension.
 The following is an exhaustive list of supported languages.
 .TS
 l l.
@@ -494,18 +494,22 @@ Python	\fB.py\fR
 Dockerfile	\fBDockerfile\fR \fBContainerfile\fR \fB.dockerfile\fR
 YAML	\fB.yaml\fR \fB.yml\fR
 Terraform	\fB.tf\fR \fB.tfvars\fR \fB.hcl\fR
+Make	\fBMakefile\fR \fBGNUmakefile\fR \fB.mk\fR \fB.inc\fR
 .TE
 .PP
-A Dockerfile base name also matches with a dotted suffix, as in
-\fBDockerfile.dev\fR.
+A Dockerfile or makefile base name also matches with a dotted suffix, as in
+\fBDockerfile.dev\fR and \fBMakefile.am\fR.
 .PP
 Highlighted elements include (non-exhaustive): keywords, numbers, strings,
 comments, preprocessor directives (C/C++), decorators (Python), mapping
-keys, anchors, aliases and block scalars (YAML), and block types, named
+keys, anchors, aliases and block scalars (YAML), block types, named
 values and
 .B ${...}
-interpolation (Terraform).  A Terraform here-document is not tracked across
-lines, so its body is coloured as though it were HCL code.
+interpolation (Terraform), and targets, directives, variable references and
+recipe prefixes (make).  A Terraform here-document is not tracked across
+lines, so its body is coloured as though it were HCL code.  A make recipe is
+scanned as makefile text rather than as shell, since the makefile chooses
+its own shell.
 .SH STARTUP CONFIGURATION
 On startup,
 .B vic
