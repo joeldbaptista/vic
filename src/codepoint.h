@@ -8,6 +8,10 @@ char *cp_next(struct editor *g, char *p);
 char *cp_prev(struct editor *g, char *p);
 char *cp_end(struct editor *g, char *p);
 int utf8_cell_width(const char *p, const char *e);
+int csi_len(const char *p, const char *end, int *is_sgr);
+char *esc_skip(struct editor *g, char *p);
+char *esc_snap_fwd(struct editor *g, char *p);
+char *esc_snap_bwd(struct editor *g, char *p);
 int next_column(struct editor *g, const char *p, int co);
 int get_column(struct editor *g, char *p);
 

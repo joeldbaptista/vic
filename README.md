@@ -25,7 +25,7 @@ principles. The main difference between `vic` and the previous two iterations
 ```sh
 cp src/config.def.h src/config.h  # first time only — config.h is gitignored
 make                               # produces ./vic
-make install                       # copies to /usr/bin/vic
+make install                       # copies to /usr/local/bin/vic
 ```
 
 Startup defaults (line numbers, syntax highlighting, tabstop, cursor
@@ -66,6 +66,18 @@ export MANPAGER="vic -p -"
 
 `docs/PAGER.md` covers the setup, the reason the descriptor swap is needed,
 and the regression coverage.
+
+To read a colourised document with its colours rather than without them, pipe
+it in with plain `-` and turn on `:run color-escape`. The escape sequences
+then occupy no display column and are passed through to the terminal, which
+is what `less -R` does:
+
+```sh
+git show --color=always | vic -    # then :run color-escape
+```
+
+`-p` is the wrong flag for that, because it strips the sequences as the
+document loads and so leaves nothing to interpret.
 
 ## Features
 

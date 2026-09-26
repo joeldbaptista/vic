@@ -46,11 +46,12 @@ UNIT_TESTS = tests/test_utf8 tests/test_line tests/test_codepoint \
 tests/test_utf8: tests/test_utf8.c src/utf8.c
 	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_utf8.c src/utf8.c
 
-tests/test_line: tests/test_line.c src/line.c
-	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_line.c src/line.c
+# line.c calls memrchr, which compat.c supplies on platforms lacking it.
+tests/test_line: tests/test_line.c src/line.c src/compat.c
+	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_line.c src/line.c src/compat.c
 
-tests/test_codepoint: tests/test_codepoint.c src/codepoint.c src/line.c src/utf8.c
-	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_codepoint.c src/codepoint.c src/line.c src/utf8.c
+tests/test_codepoint: tests/test_codepoint.c src/codepoint.c src/line.c src/utf8.c src/compat.c
+	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_codepoint.c src/codepoint.c src/line.c src/utf8.c src/compat.c
 
 tests/test_color_c: tests/test_color_c.c src/color_c.c src/color_generic.c
 	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_c.c src/color_c.c src/color_generic.c

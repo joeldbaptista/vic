@@ -472,6 +472,39 @@ are modified; all other text is passed through unchanged.
 .I pattern
 is a POSIX BRE regex.
 Highlighting is visual-only: it does not move the cursor or affect the buffer.
+.SS Terminal Colour
+.nf
+:run color-escape       toggle interpretation of SGR escapes in the buffer
+:run color-escape on    interpret them as colour
+:run color-escape off   show them as text again
+.fi
+A document produced by a colourising tool carries SGR escape sequences,
+which vic normally displays as the literal text
+.RB ` ^[[31m '.
+With this mode on such a sequence occupies no display column and is passed
+through to the terminal instead, so the text after it appears in the colour
+the document asks for \(em the equivalent of
+.B less \-R.
+The buffer is never modified, so the mode is reversible.
+.PP
+Only SGR sequences (CSI ending in
+.BR m )
+reach the terminal.
+Any other CSI sequence is removed from the display, because it would move
+the cursor or erase part of the screen.
+Backspace overstrike is not interpreted.
+.PP
+Syntax highlighting is suppressed while the mode is on, since the two would
+emit competing colour sequences.
+A colour opened on one line stays in effect on the following lines until a
+reset.
+Note that
+.B \-p
+strips these sequences as the document loads, so a document read for its
+colour must be opened with
+.B \-
+rather than
+.BR \-p .
 .SS Debugging
 .nf
 :run echo \fIargs\fR    print arguments to status bar (no range effect)

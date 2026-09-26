@@ -73,6 +73,28 @@ Without `-p` the document is inserted byte for byte, so a pipe can also be
 used to start an editing session from a command's output. Save it with
 `:w path`.
 
+## Reading colour instead of stripping it
+
+`-p` removes terminal markup. The opposite is also available: `:run
+color-escape` interprets the SGR escape sequences already in the buffer, so
+the document renders in the colours its producer asked for, the way `less -R`
+does. The sequence occupies no display column and is passed through to the
+terminal; the buffer is not modified, so the mode toggles back.
+
+```sh
+git show --color=always | vic -    # then :run color-escape
+ls -la --color=always | vic -      # same
+```
+
+The two flags do not combine: `-p` strips the sequences as the document
+loads, so `-p` followed by `:run color-escape` has nothing left to interpret.
+The command says so on the status bar when that happens.
+
+Only SGR sequences reach the terminal. Any other CSI sequence is removed from
+the display, because passing a cursor-movement or erase sequence through
+would corrupt the screen. Backspace overstrike is not interpreted, so a groff
+document with `GROFF_NO_SGR` set still needs `-p`.
+
 ## Regression coverage
 
 `tools/check-pty.c` drives these cases over a real pty, with the document on
@@ -83,3 +105,5 @@ a pipe and the terminal as the controlling terminal, which is exactly how
 - `stdin-keeps-escapes` — without `-p`, escapes are left in the document.
 - `stdin-pager-sgr` — `-p` removes CSI sequences.
 - `stdin-pager-overstrike` — `-p` removes backspace overstrike.
+- `run-color-escape` — `:run color-escape` passes SGR sequences through,
+  hides their caret notation, drops non-SGR CSI sequences, and toggles back.

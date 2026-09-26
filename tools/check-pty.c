@@ -1159,6 +1159,110 @@ matches_filter(const char *name, const char *filter)
 }
 
 /* ------------------------------------------------------------------ */
+/* :run color-escape — SGR sequences render as colour                   */
+/* ------------------------------------------------------------------ */
+
+/*
+ * run_color_escape_render — check that :run color-escape interprets the
+ * SGR escapes in the document instead of showing them as literal text.
+ *
+ * The sample holds one SGR sequence and one non-SGR CSI sequence.  Three
+ * states are inspected:
+ *
+ *   1. before the command — the screen shows "^[[31m" as text;
+ *   2. after it           — "^[[" is gone, the text reads "RED plain",
+ *                           the raw output carries "\033[31m" through to
+ *                           the terminal, and the non-SGR "\033[2J" is
+ *                           dropped rather than passed through (it would
+ *                           otherwise clear the screen);
+ *   3. after toggling     — the literal text is back, so the mode is
+ *                           reversible and the buffer was never modified.
+ */
+static int
+run_color_escape_render(const char *vi_path, const char *tmp_dir)
+{
+	const char *name = "run-color-escape";
+	const char *cmd = ":run color-escape\r";
+	char path[512];
+	int master, rc, timed_out, ok;
+	int lit_before, lit_after, lit_again;
+	int text_after, sgr_through, no_clear;
+	pid_t pid;
+	struct buf out;
+	size_t before_cmd, after_cmd;
+	char *s1, *s2, *s3;
+
+	snprintf(path, sizeof(path), "%s/vic_color_escape.txt", tmp_dir);
+	write_file(path, "\033[31mRED\033[m plain\na\033[2Jb\n");
+
+	master = open_master_pty();
+	if (master < 0)
+		return 0;
+	pid = spawn_vic(master, vi_path, path);
+	if (pid < 0) {
+		close(master);
+		return 0;
+	}
+
+	buf_init(&out);
+	wait_startup(master, pid, &out, basename_of(path), STARTUP_TIMEOUT);
+	pump_output(master, pid, &out, STARTUP_SETTLE);
+
+	/* 1. Default: the escape shows as text. */
+	s1 = strip_ansi(out.data, out.len);
+	lit_before = (strstr(s1, "^[[31m") != NULL);
+
+	/* 2. Mode on. */
+	before_cmd = out.len;
+	write_all(master, cmd, strlen(cmd));
+	pump_output(master, pid, &out, 0.60);
+
+	s2 = strip_ansi(out.data + before_cmd, out.len - before_cmd);
+	lit_after = (strstr(s2, "^[[") != NULL);
+	text_after = (strstr(s2, "RED plain") != NULL);
+	sgr_through = (xmemmem(out.data + before_cmd, out.len - before_cmd,
+	                       "\033[31m", 5) != NULL);
+	no_clear = (xmemmem(out.data + before_cmd, out.len - before_cmd,
+	                    "\033[2J", 4) == NULL);
+
+	/* 3. Mode off again. */
+	after_cmd = out.len;
+	write_all(master, cmd, strlen(cmd));
+	pump_output(master, pid, &out, 0.60);
+
+	s3 = strip_ansi(out.data + after_cmd, out.len - after_cmd);
+	lit_again = (strstr(s3, "^[[31m") != NULL);
+
+	write_all(master, ":q!\r", 4);
+	rc = finish(pump_output(master, pid, &out, FINISH_TIMEOUT), pid,
+	            &timed_out);
+	close(master);
+
+	ok = lit_before && !lit_after && text_after && sgr_through &&
+	     no_clear && lit_again;
+
+	printf("[%s] rc=%d timed_out=%s\n", name, rc,
+	       timed_out ? "True" : "False");
+	if (ok) {
+		printf("[%s] PASS\n", name);
+	} else {
+		printf("[%s] FAIL\n", name);
+		printf("[%s] lit_before=%d lit_after=%d text_after=%d "
+		       "sgr_through=%d no_clear=%d lit_again=%d\n",
+		       name, lit_before, lit_after, text_after, sgr_through,
+		       no_clear, lit_again);
+		printf("[%s] rendered with the mode on:\n%s\n", name, s2);
+	}
+	printf("[%s] file: %s\n", name, path);
+
+	free(s1);
+	free(s2);
+	free(s3);
+	buf_free(&out);
+	return ok;
+}
+
+/* ------------------------------------------------------------------ */
 /* main                                                                 */
 /* ------------------------------------------------------------------ */
 
@@ -1206,6 +1310,8 @@ main(int argc, char *argv[])
 		all_ok = run_visual_esc_clear(vi_path, tmp_dir) && all_ok;
 	if (matches_filter("visual-block-highlight-c", filter))
 		all_ok = run_block_visual_highlight_c(vi_path, tmp_dir) && all_ok;
+	if (matches_filter("run-color-escape", filter))
+		all_ok = run_color_escape_render(vi_path, tmp_dir) && all_ok;
 
 	/* "-" reads the document from a pipe; -p additionally strips the
 	 * terminal markup a formatter such as man(1) emits. */

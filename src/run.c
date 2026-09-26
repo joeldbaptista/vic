@@ -26,9 +26,12 @@
  *   hash                     — FNV-1a hash of entire range
  *   hash mod N               — per-identifier hash%N; report collisions
  *   hash replace [mod N]     — replace identifiers with hash literals
+ *   highlight [pattern]      — set or clear the viewport highlight pattern
+ *   color-escape [on|off]    — render SGR escapes in the buffer as colour
  */
 #include "run.h"
 #include "buffer.h"
+#include "screen.h"
 #include "status.h"
 #include "undo.h"
 #include <ctype.h>
@@ -1494,6 +1497,54 @@ run_highlight(struct editor *g, int argc, char *argv[],
 		g->highlight_pattern = xstrdup(argv[1]);
 }
 
+static void
+run_color_escape(struct editor *g, int argc, char *argv[],
+                 char *rs, char *re)
+{
+	/*
+	 * == :run color-escape [on|off] — interpret SGR escapes as colour ==
+	 *
+	 * A document produced by a colourising tool carries SGR escape
+	 * sequences, which vic normally displays as the literal text
+	 * "^[[31m".  With this mode on such a sequence occupies no display
+	 * column and is passed through to the terminal instead, so the text
+	 * after it appears in the colour the document asks for.
+	 *
+	 * The buffer is not modified, so the mode is reversible.  With no
+	 * argument it toggles; "on" and "off" set it explicitly.  The syntax
+	 * colorizer is suppressed while the mode is on, because the two would
+	 * emit competing SGR sequences.  rs/re are ignored.
+	 *
+	 * Clearing the shadow screen and dropping refresh_last_screenbegin
+	 * forces the next refresh to redraw every row, since neither the text
+	 * nor the cursor position changed.
+	 */
+	(void)rs;
+	(void)re;
+
+	if (argc >= 2) {
+		if (strcmp(argv[1], "on") == 0) {
+			g->color_escape = 1;
+		} else if (strcmp(argv[1], "off") == 0) {
+			g->color_escape = 0;
+		} else {
+			status_line(g, "color-escape: expected 'on' or 'off'");
+			return;
+		}
+	} else {
+		g->color_escape = !g->color_escape;
+	}
+
+	g->esc_sgr[0] = '\0';
+	screen_erase(g);
+	g->refresh_last_screenbegin = NULL;
+
+	if (g->color_escape && g->pager_mode)
+		status_line(g, "color-escape on (-p already stripped the escapes)");
+	else
+		status_line(g, "color-escape %s", g->color_escape ? "on" : "off");
+}
+
 /* ---- dispatch table ---------------------------------------------------- */
 
 static const struct run_entry run_table[] = {
@@ -1520,6 +1571,7 @@ static const struct run_entry run_table[] = {
     {"col", run_col},
     {"hash", run_hash},
     {"highlight", run_highlight},
+    {"color-escape", run_color_escape},
     {NULL, NULL},
 };
 

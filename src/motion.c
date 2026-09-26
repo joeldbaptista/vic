@@ -31,11 +31,14 @@ dot_left(struct editor *g)
 	 *
 	 * Commits any pending undo queue, then retreats dot by one codepoint.
 	 * Does not cross the preceding newline (stays on the current line).
+	 *
+	 * With 'color-escape' active an escape run occupies no column, so the
+	 * cursor steps over a whole run rather than stalling inside it.
 	 */
 	undo_queue_commit(g);
 	g->dot = cp_start(g, g->dot);
 	if (g->dot > g->text && g->dot[-1] != '\n')
-		g->dot = cp_prev(g, g->dot);
+		g->dot = esc_snap_bwd(g, cp_prev(g, g->dot));
 }
 
 void
@@ -46,11 +49,15 @@ dot_right(struct editor *g)
 	 *
 	 * Commits any pending undo queue, then advances dot by one codepoint.
 	 * Does not cross the trailing newline of the current line.
+	 *
+	 * With 'color-escape' active an escape run occupies no column, so the
+	 * cursor steps over a whole run rather than stalling inside it.  The
+	 * first snap covers a cursor that some other motion left inside a run.
 	 */
 	undo_queue_commit(g);
-	g->dot = cp_start(g, g->dot);
+	g->dot = esc_snap_fwd(g, cp_start(g, g->dot));
 	if (g->dot < g->end - 1 && *g->dot != '\n')
-		g->dot = cp_next(g, g->dot);
+		g->dot = esc_snap_fwd(g, cp_next(g, g->dot));
 }
 
 void
@@ -58,9 +65,12 @@ dot_begin(struct editor *g)
 {
 	/*
 	 * == Move cursor to the first byte of the current line ==
+	 *
+	 * With 'color-escape' active a leading escape run occupies no column,
+	 * so the cursor is placed on the first visible character instead.
 	 */
 	undo_queue_commit(g);
-	g->dot = begin_line(g, g->dot);
+	g->dot = esc_skip(g, begin_line(g, g->dot));
 }
 
 void
@@ -93,9 +103,15 @@ move_to_col(struct editor *g, char *p, int l)
 	while (p < g->end) {
 		int nco;
 		char *next;
+		char *sk;
 
 		if (*p == '\n')
 			break;
+		sk = esc_skip(g, p);
+		if (sk != p) {
+			p = sk;
+			continue;
+		}
 		nco = next_column(g, p, co);
 		if (nco > l)
 			break;

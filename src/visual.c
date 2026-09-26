@@ -289,7 +289,12 @@ block_selection_ranges(struct editor *g, int *count)
 
 		while (ptr < g->end && *ptr != '\n') {
 			char *nxt = cp_next(g, ptr);
+			char *sk = esc_skip(g, ptr);
 
+			if (sk != ptr) {
+				ptr = sk;
+				continue;
+			}
 			if (p == NULL) {
 				if (co >= col_left) {
 					if (co > col_right)

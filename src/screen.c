@@ -16,6 +16,11 @@
  * inserting line numbers, visual-mode highlighting, tab expansion, and
  * non-printable escapes.  skip_line_to_offset handles horizontal scrolling.
  *
+ * With 'color-escape' active (:run color-escape) an SGR escape sequence in
+ * the buffer occupies no display column and is passed through to the
+ * terminal instead of being shown as "^[[...m", so the document's own
+ * colours render.  See esc_sgr_store.
+ *
  * All upward calls (cursor sync, option queries, visual range, terminal
  * writes) go through screen_hooks.
  */
@@ -140,6 +145,52 @@ screen_text_columns_on_screen(struct editor *g)
 	return text_cols;
 }
 
+/* ---- color-escape ------------------------------------------------------ */
+
+static int
+is_sgr_reset(const char *p, int n)
+{
+	/*
+	 * == True if the n-byte SGR sequence at p resets all attributes ==
+	 *
+	 * SGR with no parameters ("\033[m") and SGR whose parameters are all
+	 * zero ("\033[0m", "\033[00m", "\033[0;0m") both restore the default.
+	 * Recognising them lets esc_sgr_store drop the carry instead of
+	 * re-emitting a sequence that only undoes itself.
+	 */
+	int i;
+
+	for (i = 2; i < n - 1; i++) {
+		if (p[i] != '0' && p[i] != ';')
+			return 0;
+	}
+	return 1;
+}
+
+static void
+esc_sgr_store(struct editor *g, const char *p, int n)
+{
+	/*
+	 * == Record the SGR sequence now in effect for 'color-escape' mode ==
+	 *
+	 * g->esc_sgr holds the colour that applies to the text following the
+	 * last SGR sequence seen.  format_line re-emits it after a visual or
+	 * search-highlight span ends, and refresh carries it from one line to
+	 * the next so a colour opened on an earlier line keeps applying.
+	 *
+	 * An empty g->esc_sgr means the terminal default.  A reset sequence
+	 * ("\033[m" or "\033[0m") therefore clears the buffer rather than
+	 * filling it, and a sequence too long to hold does the same — the text
+	 * renders correctly on its own line, and only the carry is lost.
+	 */
+	if (n <= 0 || n >= ESC_SGR_MAX || is_sgr_reset(p, n)) {
+		g->esc_sgr[0] = '\0';
+		return;
+	}
+	memcpy(g->esc_sgr, p, (size_t)n);
+	g->esc_sgr[n] = '\0';
+}
+
 static char *
 skip_line_to_offset(struct editor *g, char *src, int ofs,
                     int *co)
@@ -154,6 +205,23 @@ skip_line_to_offset(struct editor *g, char *src, int ofs,
 	 */
 	while (src < g->end && *src != '\n' && *co < ofs) {
 		unsigned char c = (unsigned char)*src;
+
+		if (g->color_escape && c == ASCII_ESC) {
+			int is_sgr = 0;
+			int n = csi_len(src, g->end, &is_sgr);
+
+			if (n > 0) {
+				/*
+				 * The sequence is scrolled off the left edge, but
+				 * the colour it sets still applies to the text that
+				 * remains visible, so record it for the prologue.
+				 */
+				if (is_sgr)
+					esc_sgr_store(g, src, n);
+				src += n;
+				continue;
+			}
+		}
 
 		if (c >= ' ' && c < ASCII_DEL && c != '\t') {
 			char *run = src;
@@ -374,6 +442,25 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 	co = 0;
 	src = skip_line_to_offset(g, src, ofs, &co);
 
+	if (g->color_escape) {
+		/*
+		 * Prologue: clear whatever attribute the previous row left
+		 * active, then apply the colour in effect at the first visible
+		 * column — which may have been set on an earlier line or in the
+		 * part of this line scrolled off to the left.
+		 */
+		size_t n = strlen(g->esc_sgr);
+
+		if (dest + 3 <= dest_end) {
+			memcpy(dest, ESC_NORM_TEXT, 3);
+			dest += 3;
+		}
+		if (n > 0 && dest + n <= dest_end) {
+			memcpy(dest, g->esc_sgr, n);
+			dest += n;
+		}
+	}
+
 	shown_cols = 0;
 	while (shown_cols < text_cols) {
 		char *next;
@@ -385,6 +472,34 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 
 		if (src >= g->end)
 			break;
+
+		if (g->color_escape && (unsigned char)*src == ASCII_ESC) {
+			int is_sgr = 0;
+			int n = csi_len(src, g->end, &is_sgr);
+
+			if (n > 0) {
+				/*
+				 * Zero width: the sequence advances neither co nor
+				 * shown_cols.  Only SGR is passed through — any other
+				 * CSI sequence would move the cursor or erase part of
+				 * the screen, so it is consumed and dropped.  Inside a
+				 * visual or highlight span the colour is recorded but
+				 * not emitted, so the span keeps its own attribute;
+				 * the SGR-change block below restores it on exit.
+				 */
+				if (is_sgr) {
+					esc_sgr_store(g, src, n);
+					if (!cur_in_visual && !cur_in_hl &&
+					    dest + n <= dest_end) {
+						memcpy(dest, src, (size_t)n);
+						dest += n;
+					}
+				}
+				src += n;
+				continue;
+			}
+		}
+
 		next = cp_next(g, src);
 
 		/* Skip bare continuation bytes (0x80–0xBF) and truncated multi-byte
@@ -434,6 +549,14 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 			if (dest + n <= dest_end) {
 				memcpy(dest, sgr, n);
 				dest += n;
+			}
+			if (g->color_escape && !new_visual && !new_hl &&
+			    g->esc_sgr[0] != '\0') {
+				n = strlen(g->esc_sgr);
+				if (dest + n <= dest_end) {
+					memcpy(dest, g->esc_sgr, n);
+					dest += n;
+				}
 			}
 			cur_in_visual = new_visual;
 			cur_in_hl = new_hl;
@@ -506,7 +629,8 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 	}
 
 	/* Reset any active SGR before padding. */
-	if (cur_in_visual || cur_in_hl || cur_attr != ATTR_NORMAL || colorizer) {
+	if (cur_in_visual || cur_in_hl || cur_attr != ATTR_NORMAL || colorizer ||
+	    g->color_escape) {
 		if (dest + 3 <= dest_end) {
 			memcpy(dest, "\033[m", 3);
 			dest += 3;
@@ -555,7 +679,8 @@ refresh(struct editor *g, int full_screen)
 	 * - Returns early (cursor move only) when nothing has changed and
 	 *   visual/relative-number modes are off.
 	 * - Compiles the highlight regex once per refresh for hlsearch.
-	 * - Pre-scans lines above screenbegin to seed the colorizer state.
+	 * - Pre-scans lines above screenbegin to seed the colorizer state, and
+	 *   the carried SGR sequence when 'color-escape' is active.
 	 */
 	int li;
 	int text_cols;
@@ -609,10 +734,39 @@ refresh(struct editor *g, int full_screen)
 	}
 	tp = g->screenbegin;
 
+	/*
+	 * color-escape: pre-scan the lines above the viewport for the SGR
+	 * sequence still in effect at the first visible line, so a colour
+	 * opened earlier in the document keeps applying after a scroll.
+	 */
+	if (g->color_escape) {
+		char *p = g->text;
+
+		g->esc_sgr[0] = '\0';
+		while (p < g->screenbegin) {
+			int is_sgr = 0;
+			int n;
+
+			p = memchr(p, ASCII_ESC, (size_t)(g->screenbegin - p));
+			if (p == NULL)
+				break;
+			n = csi_len(p, g->end, &is_sgr);
+			if (n <= 0) {
+				p++;
+				continue;
+			}
+			if (is_sgr)
+				esc_sgr_store(g, p, n);
+			p += n;
+		}
+	}
+
 	/* Set up syntax colorizer; pre-scan to get state at the first visible line.
 	 * Call colorize per line with NULL attrs — we only need the returned state.
 	 */
-	colorizer = IS_SYNTAX(g) ? colorizer_find(g->current_filename) : NULL;
+	colorizer = (IS_SYNTAX(g) && !g->color_escape)
+	                ? colorizer_find(g->current_filename)
+	                : NULL;
 	color_state = 0;
 	if (colorizer) {
 		char *p = g->text;

@@ -92,6 +92,19 @@ enum {
 #define CSI_FINAL_BYTE_MIN 0x40 /* '@' */
 #define CSI_FINAL_BYTE_MAX 0x7e /* '~' */
 
+/* CSI parameter and intermediate byte ranges (ECMA-48) */
+#define CSI_PARAM_BYTE_MIN 0x30 /* '0' */
+#define CSI_PARAM_BYTE_MAX 0x3f /* '?' */
+#define CSI_INTER_BYTE_MIN 0x20 /* ' ' */
+#define CSI_INTER_BYTE_MAX 0x2f /* '/' */
+
+/*
+ * Capacity of the SGR sequence that 'color-escape' carries from one line to
+ * the next.  A longer sequence still renders on its own line; only the carry
+ * into the following line is dropped.
+ */
+#define ESC_SGR_MAX 64
+
 /* Bracketed-paste mode CSI parameter values (\e[200~ / \e[201~). */
 #define CSI_PASTE_BEGIN_PARAM 200
 #define CSI_PASTE_END_PARAM 201
@@ -243,6 +256,7 @@ struct editor {
 	int setops;
 	int readonly_mode;
 	int pager_mode; /* -p: strip terminal escapes from the document */
+	int color_escape; /* :run color-escape — render SGR escapes as colour */
 	int tabstop;
 	int cshp; /* cursor shape */
 
@@ -273,6 +287,9 @@ struct editor {
 
 	/* --- Highlight --- */
 	char *highlight_pattern; /* pattern set by :run highlight; NULL = none */
+
+	/* --- color-escape --- */
+	char esc_sgr[ESC_SGR_MAX]; /* SGR sequence active at the current line */
 
 	/* --- Insert / autoindent --- */
 	int indent_col; /* column of recent autoindent, or 0 */
