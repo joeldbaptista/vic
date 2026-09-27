@@ -233,8 +233,9 @@ init_globals(struct editor *g)
 	 * == Zero-initialise g and set compile-time defaults ==
 	 *
 	 * Called once before any file is loaded.  Records the session epoch
-	 * (used for the yank temp file name), seeds tabstop and setops from
-	 * config.h, and allocates the initial last_search_pattern buffer.
+	 * (used for the yank temp file name), seeds tabstop, setops and
+	 * color_escape from config.h, and allocates the initial
+	 * last_search_pattern buffer.
 	 */
 	g->session_epoch = time(NULL);
 	g->last_modified_count = -1;
@@ -248,6 +249,7 @@ init_globals(struct editor *g)
 	            (CFG_RELATIVENUMBER ? VI_RELATIVENUMBER : 0) |
 	            (CFG_UNDOFILE ? VI_UNDOFILE : 0) |
 	            (CFG_SYNTAX ? VI_SYNTAX : 0);
+	g->color_escape = CFG_COLORESCAPE ? 1 : 0;
 	g->newindent = -1;
 	g->line_count_cache_stamp = INT_MIN;
 	g->refresh_last_modified_count = INT_MIN;

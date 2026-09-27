@@ -28,8 +28,8 @@ make                               # produces ./vic
 make install                       # copies to /usr/local/bin/vic
 ```
 
-Startup defaults (line numbers, syntax highlighting, tabstop, cursor
-shapes, ...) live in `src/config.h`. Edit it and recompile to change them;
+Startup defaults (line numbers, syntax highlighting, escape colouring,
+tabstop, cursor shapes, ...) live in `src/config.h`. Edit it and recompile to change them;
 `src/config.def.h` is the upstream default.
 
 Requirements: a C99 compiler, POSIX.1-2008, a Linux terminal. No external
@@ -68,13 +68,16 @@ export MANPAGER="vic -p -"
 and the regression coverage.
 
 To read a colourised document with its colours rather than without them, pipe
-it in with plain `-` and turn on `:run color-escape`. The escape sequences
-then occupy no display column and are passed through to the terminal, which
-is what `less -R` does:
+it in with plain `-`. The escape sequences then occupy no display column and
+are passed through to the terminal, which is what `less -R` does:
 
 ```sh
-git show --color=always | vic -    # then :run color-escape
+git show --color=always | vic -
 ```
+
+That is `:run color-escape`, and it starts on (`CFG_COLORESCAPE` in
+`src/config.h`). Turn it off for a session with `:run color-escape off`, which
+shows the sequences as literal text again.
 
 `-p` is the wrong flag for that, because it strips the sequences as the
 document loads and so leaves nothing to interpret.

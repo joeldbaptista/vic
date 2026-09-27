@@ -81,10 +81,15 @@ the document renders in the colours its producer asked for, the way `less -R`
 does. The sequence occupies no display column and is passed through to the
 terminal; the buffer is not modified, so the mode toggles back.
 
+The mode starts on, because `CFG_COLORESCAPE` in `src/config.h` defaults to 1,
+so a colourised document needs no command:
+
 ```sh
-git show --color=always | vic -    # then :run color-escape
+git show --color=always | vic -
 ls -la --color=always | vic -      # same
 ```
+
+`:run color-escape off` shows the sequences as literal text again.
 
 The two flags do not combine: `-p` strips the sequences as the document
 loads, so `-p` followed by `:run color-escape` has nothing left to interpret.

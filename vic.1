@@ -486,6 +486,11 @@ through to the terminal instead, so the text after it appears in the colour
 the document asks for \(em the equivalent of
 .B less \-R.
 The buffer is never modified, so the mode is reversible.
+The mode starts on, because
+.B CFG_COLORESCAPE
+in
+.I src/config.h
+defaults to 1; set it to 0 and rebuild to start with the mode off.
 .PP
 Only SGR sequences (CSI ending in
 .BR m )

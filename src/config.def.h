@@ -4,8 +4,9 @@
  * Copy to config.h (gitignored) and edit to taste, then `make`:
  *   cp src/config.def.h src/config.h
  *
- * Every value here is also reachable at runtime via :set (see OPTS_STR in
- * vic.h) — this file only picks what a freshly started vic begins with.
+ * Every value here is also reachable at runtime, via :set (see OPTS_STR in
+ * vic.h) or via :run — this file only picks what a freshly started vic
+ * begins with.
  */
 #ifndef SRC_CONFIG_H
 #define SRC_CONFIG_H
@@ -22,6 +23,15 @@
 #define CFG_RELATIVENUMBER 1 /* rnu  — show relative line numbers */
 #define CFG_UNDOFILE 0       /* uf   — persist undo history to disk */
 #define CFG_SYNTAX 0         /* syn  — syntax highlighting */
+
+/*
+ * Boolean :run toggle, at startup: 1 = on, 0 = off.  Not a :set option;
+ * change it at runtime with ":run color-escape [on|off]".
+ */
+#define CFG_COLORESCAPE 1    /* :run color-escape — render SGR escape
+                              * sequences in the document as colour
+                              * instead of as literal text; suppresses
+                              * the syntax colorizer while on */
 
 /* ts — width of a tab stop, in columns (1-32). */
 #define CFG_TABSTOP 8
