@@ -22,16 +22,14 @@
 #define CFG_NUMBER 1         /* nu   — show line numbers */
 #define CFG_RELATIVENUMBER 1 /* rnu  — show relative line numbers */
 #define CFG_UNDOFILE 0       /* uf   — persist undo history to disk */
-#define CFG_SYNTAX 0         /* syn  — syntax highlighting */
+#define CFG_SYNTAX 1         /* syn  — syntax highlighting */
 
-/*
- * Boolean :run toggle, at startup: 1 = on, 0 = off.  Not a :set option;
- * change it at runtime with ":run color-escape [on|off]".
+/* :run color-escape — render SGR escape sequences in the document as colour
+ * instead of as literal text; suppresses the syntax colorizer while on.
+ *
+ * BUG: if CFG_COLORESCAPE == 1, syntax colouring for C et al does not work.
  */
-#define CFG_COLORESCAPE 1    /* :run color-escape — render SGR escape
-                              * sequences in the document as colour
-                              * instead of as literal text; suppresses
-                              * the syntax colorizer while on */
+#define CFG_COLORESCAPE 0    
 
 /* ts — width of a tab stop, in columns (1-32). */
 #define CFG_TABSTOP 8
