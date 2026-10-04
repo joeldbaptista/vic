@@ -2,7 +2,7 @@
 
 This file defines the supported behavior contract for this project.
 
-Last updated: 2026-09-14.
+Last updated: 2026-10-04.
 
 ## Scope of support
 
@@ -132,13 +132,23 @@ Last updated: 2026-09-14.
   conditional at the head of the file is coloured as an assignment. The body of a
   recipe is scanned as makefile text rather than as shell, because the shell is
   chosen by the makefile (`SHELL = ...`) and so is not fixed.
+- awk scripts (`.awk`, `.gawk`): keywords (`BEGIN`, `END`, `BEGINFILE`, `ENDFILE`,
+  `function`, `if`, `print`, `getline`, ...), the built-in function names of POSIX awk
+  and gawk (`length`, `sub`, `gensub`, ...), which awk reserves as it reserves keywords,
+  field references (`$1`, `$NF`, `$(i+1)`), the gawk directives `@include`, `@load` and
+  `@namespace`, quoted strings, regex literals (`/^#/`), `#` comments, and numbers
+  (decimal, float, exponent, and gawk `0x` hex). A `/` opens a regex literal only where
+  an operand is expected, which is how awk itself tells a regex from a division, and
+  only when the same line holds the closing `/`; otherwise the `/` is a division. The
+  built-in variables (`NR`, `NF`, `FS`, ...) are ordinary names to awk, so they are not
+  highlighted.
 - Dockerfiles: instructions (`FROM`, `RUN`, `COPY`, ...) at the head of a logical line,
   variable expansions (`$VAR`, `${VAR}`), `#` comments, quoted strings, numbers. A line
   continued with a trailing backslash does not start a new instruction on the next line.
 - The scheme is monochromatic: tokens are distinguished by SGR attribute (bold, dim, grey),
   not by colour.
 - Opening a file also re-seeds `tabstop` from the file type, overriding the `config.h`
-  default and any earlier `:set tabstop=`. Terraform and YAML use 2; Dockerfile,
+  default and any earlier `:set tabstop=`. Terraform and YAML use 2; awk, Dockerfile,
   Markdown, Python, shell and SQL use 4; C, C++ and makefiles use 8; every other file
   type uses the `config.h` default.
 

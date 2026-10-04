@@ -542,6 +542,7 @@ makefiles, which normally carry no extension.
 | YAML     | `.yaml` `.yml`                          |
 | Terraform| `.tf` `.tfvars` `.hcl`                  |
 | Make     | `Makefile` `GNUmakefile` `.mk` `.inc`   |
+| awk      | `.awk` `.gawk`                          |
 
 Highlighted elements vary by language but include:
 - **Keywords** — language reserved words
@@ -553,6 +554,7 @@ Highlighted elements vary by language but include:
 - **Mapping keys, anchors, aliases and block scalars** — (YAML)
 - **Block types, named values and `${...}` interpolation** — (Terraform)
 - **Targets, directives, variable references and recipe prefixes** — (make)
+- **Field references and regex literals** — `$1`, `/re/` (awk)
 
 ---
 

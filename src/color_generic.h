@@ -2,7 +2,7 @@
  * color_generic.h - table-driven syntax colorizer engine.
  *
  * Shared by color_c.c, color_py.c, color_sh.c, color_sql.c, color_docker.c,
- * and color_tf.c.  Each of those files owns only its keyword table(s) and a
+ * color_tf.c, and color_awk.c.  Each of those files owns only its keyword table(s) and a
  * static struct lang_spec describing its syntax; colorize_generic() does the
  * actual scanning.
  *
@@ -62,6 +62,7 @@ struct lang_spec {
 	char decorator_char; /* e.g. '@'; 0 = none. decorator ident -> ATTR_PREPROC, any position */
 	char bol_char;        /* e.g. '#'; 0 = none. Only fires as the first non-blank byte on the line */
 	int bol_continuation;   /* trailing '\' keeps bol coloring and state alive across lines */
+	int regex_slash;          /* '/' where an operand is expected opens a /regex/ -> ATTR_STRING */
 };
 
 /*

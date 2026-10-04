@@ -5,8 +5,9 @@
  * language colorizer: keyword lookup, identifier/number scanning, block
  * and line comments, and quoted strings (including triple-quoted and
  * cross-line variants).  Per-language quirks - C preprocessor lines,
- * Python decorators, shell variable expansion - are expressed as data
- * in struct lang_spec (see color_generic.h) rather than code here.
+ * Python decorators, shell variable expansion, awk regex literals - are
+ * expressed as data in struct lang_spec (see color_generic.h) rather than
+ * code here.
  */
 #include "color_generic.h"
 #include "color.h"
@@ -240,6 +241,44 @@ scan_number(const char *line, int len, int i, const struct num_spec *num)
 }
 
 static int
+scan_regex(const char *line, int len, int i)
+{
+	/*
+	 * == Find the end of a /regex/ literal that opens at line[i] ==
+	 *
+	 * line[i] is the opening '/'.  A backslash escapes the following
+	 * byte, and a '/' inside a bracket expression ([/], []/], [^]/])
+	 * does not close the literal.  The literal never spans lines.
+	 * Returns the index just past the closing '/', or -1 when this line
+	 * holds no close, in which case the '/' is a division operator.
+	 */
+	int bracket = 0;
+
+	for (i++; i < len; i++) {
+		if (line[i] == '\\') {
+			i++;
+			continue;
+		}
+		if (bracket) {
+			if (line[i] == ']')
+				bracket = 0;
+			continue;
+		}
+		if (line[i] == '[') {
+			bracket = 1;
+			if (i + 1 < len && line[i + 1] == '^')
+				i++;
+			if (i + 1 < len && line[i + 1] == ']')
+				i++;
+			continue;
+		}
+		if (line[i] == '/')
+			return i + 1;
+	}
+	return -1;
+}
+
+static int
 find_triple_close(const char *line, int len, int j, char q, int escape)
 {
 	/*
@@ -407,6 +446,7 @@ colorize_generic(int state, const char *line, int len, char *attrs,
 	 */
 	int i = 0;
 	int kw_ok = 1;
+	int operand = 0; /* regex_slash: last token was an operand, so '/' divides */
 
 	fill_attrs(attrs, 0, len, ATTR_NORMAL);
 
@@ -493,12 +533,25 @@ normal:
 
 		if (spec->decorator_char && c == (unsigned char)spec->decorator_char) {
 			i = scan_sigil(line, len, i, attrs);
+			operand = 0;
 			continue;
 		}
 
 		if (spec->sigil_char && c == (unsigned char)spec->sigil_char) {
 			i = scan_sigil(line, len, i, attrs);
+			operand = 1;
 			continue;
+		}
+
+		if (spec->regex_slash && c == '/' && !operand) {
+			int end = scan_regex(line, len, i);
+
+			if (end >= 0) {
+				fill_attrs(attrs, i, end, ATTR_STRING);
+				i = end;
+				operand = 1;
+				continue;
+			}
 		}
 
 		quote_pos = try_open_string(line, len, i, spec, &spec_idx);
@@ -509,6 +562,7 @@ normal:
 			                      quote_pos, attrs, &new_state);
 			if (new_state != CS_NORMAL)
 				return new_state;
+			operand = 1;
 			continue;
 		}
 
@@ -520,6 +574,7 @@ normal:
 			    !is_ident((unsigned char)line[end]))
 				fill_attrs(attrs, start, end, ATTR_NUMBER);
 			i = end;
+			operand = 1;
 			continue;
 		}
 
@@ -530,11 +585,26 @@ normal:
 				i++;
 			if ((!spec->keywords_bol || (kw_ok && is_bol(line, start))) &&
 			    keyword_lookup(line + start, i - start, spec->keywords,
-			                    spec->keywords_ci))
+			                    spec->keywords_ci)) {
 				fill_attrs(attrs, start, i, ATTR_KEYWORD);
+				operand = 0;
+			} else {
+				operand = 1;
+			}
 			continue;
 		}
 
+		/*
+		 * A closing bracket ends an operand, and a postfix ++ or --
+		 * leaves the operand in place; blanks change nothing.  Any
+		 * other punctuation expects an operand next.
+		 */
+		if (c == ')' || c == ']')
+			operand = 1;
+		else if ((c == '+' || c == '-') && i + 1 < len && line[i + 1] == c)
+			i++;
+		else if (c != ' ' && c != '\t')
+			operand = 0;
 		i++;
 	}
 

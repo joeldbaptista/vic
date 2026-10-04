@@ -177,8 +177,8 @@ Cursor shape values: `0` terminal default, `1` blinking block, `2` block,
 
 `tabstop` is re-seeded from the file type every time a file is opened, so
 the default above applies only to file types that declare no width of their
-own. Terraform and YAML files use 2; Dockerfile, Markdown, Python, shell
-and SQL files use 4; C, C++ and makefiles use 8. A `:set tabstop=N`
+own. Terraform and YAML files use 2; awk, Dockerfile, Markdown, Python,
+shell and SQL files use 4; C, C++ and makefiles use 8. A `:set tabstop=N`
 therefore lasts until the next file is opened.
 
 ### Syntax highlighting
@@ -211,6 +211,7 @@ Languages and names:
 | YAML | `.yaml` `.yml` |
 | Terraform (HCL) | `.tf` `.tfvars` `.hcl` |
 | Make | `Makefile`, `GNUmakefile`, `BSDmakefile`, any of them with a dotted suffix (`Makefile.am`), `.mk`, `.mak`, `.make`, `.inc` |
+| awk | `.awk` `.gawk` |
 
 ## Design
 
@@ -282,6 +283,7 @@ color_docker.c  Dockerfile colorizer
 color_yaml.c    YAML colorizer
 color_tf.c      Terraform (HCL) colorizer
 color_make.c    makefile colorizer
+color_awk.c     awk colorizer
 ```
 
 ## Multiple files and tmux
