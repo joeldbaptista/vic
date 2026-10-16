@@ -3,6 +3,6 @@
 
 #include "vic.h"
 
-char *skip_thing(struct editor *g, char *p, int linecnt, int dir, int type);
+int skip_thing(struct editor *g, int p, int linecnt, int dir, int type);
 
 #endif
