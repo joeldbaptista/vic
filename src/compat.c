@@ -13,7 +13,7 @@
  */
 #include "vic.h"
 
-#define VERSION_STR	"version: experimental-piece-tree"
+#define VERSION_STR	"version: vic 2.0"
 
 __attribute__((noreturn)) void
 die(const char *msg)
