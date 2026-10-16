@@ -5,8 +5,8 @@
 
 void undo_queue_commit(struct editor *g);
 void flush_undo_data(struct editor *g);
-void undo_push(struct editor *g, char *src, unsigned length, int u_type);
-void undo_push_insert(struct editor *g, char *p, int len, int undo);
+void undo_push(struct editor *g, int src, unsigned length, int u_type);
+void undo_push_insert(struct editor *g, int p, int len, int undo);
 void undo_pop(struct editor *g);
 void undo_with_redo(struct editor *g);
 void redo_pop(struct editor *g);
