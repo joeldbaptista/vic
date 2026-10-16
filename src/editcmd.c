@@ -19,6 +19,7 @@
 #include "codepoint.h"
 #include "line.h"
 #include "motion.h"
+#include "text.h"
 #include "undo.h"
 
 void
@@ -81,7 +82,7 @@ edit_run_append_after_cmd(struct editor *g)
 	 * Steps dot one codepoint right (unless already on a newline) so that
 	 * subsequent inserts land after the current character.
 	 */
-	if (*g->dot != '\n')
+	if (text_char(g, g->dot) != '\n')
 		g->dot = cp_next(g, g->dot);
 	edit_run_start_insert_cmd(g);
 }
@@ -108,11 +109,11 @@ edit_run_join_lines_cmd(struct editor *g)
 	 */
 	do {
 		dot_end(g);
-		if (g->dot < g->end - 1) {
+		if (g->dot < text_len(g) - 1) {
 			undo_push(g, g->dot, 1, UNDO_DEL);
-			*g->dot++ = ' ';
+			text_set_char(g, g->dot++, ' ');
 			undo_push(g, g->dot - 1, 1, UNDO_INS_CHAIN);
-			while (isblank((unsigned char)*g->dot))
+			while (isblank(text_char(g, g->dot)))
 				text_hole_delete(g, g->dot, g->dot, ALLOW_UNDO_CHAIN);
 		}
 	} while (--g->cmdcnt > 0);
