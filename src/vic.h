@@ -2,6 +2,7 @@
 #define VI_H
 
 #include "parser.h"
+#include "pt.h"
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -220,10 +221,8 @@ struct cmd_ctx {
 
 struct editor {
 	/* --- Buffer (hot path — keep near top) --- */
-	char *text, *end; /* heap slab bounds */
-	char *dot;        /* current cursor position */
-	int text_size;    /* allocated capacity */
-	int realloc_count; /* number of times text_hole_make has reallocated g->text */
+	struct ptree *pt; /* the text, a piece tree (pt.h) */
+	int dot;          /* cursor: byte offset into the text */
 
 	/* --- Mode & command dispatch --- */
 	int editing;  /* >0 while editing a file */
@@ -237,18 +236,18 @@ struct editor {
 	struct cmd_ctx last_cmd_ctx; /* parser snapshot for '.' repeat */
 	int has_last_cmd_ctx;        /* 1 = last_cmd_ctx is valid */
 	char *ioq, *ioq_start;       /* replay queue for get_one_char */
-	char *rstart;                /* start of text in Replace mode */
+	int rstart;                  /* start of text in Replace mode, or -1 */
 
 	/* --- Visual mode --- */
 	int visual_mode; /* 0=off  1=charwise  2=linewise  3=block */
-	char *visual_anchor;
+	int visual_anchor; /* byte offset, or -1 when not in visual mode */
 	int vis_ai_pending;  /* 0=none; 'a'/'i'=collecting text-object anchor */
 	int vis_reg_pending; /* 0=none; 1=saw '"', waiting for register char  */
 
 	/* --- Block-visual insert (I in Ctrl-V mode) --- */
 	int vis_block_insert_active;    /* 1 while a block-insert replay is pending */
 	int vis_block_insert_col;       /* col_left of the block selection */
-	int vis_block_insert_start_off; /* byte offset into text[] where insert began */
+	int vis_block_insert_start_off; /* byte offset where insert began */
 	int vis_block_row_top_off;      /* byte offset of the block's top begin_line */
 	int vis_block_row_bot_off;      /* byte offset of the block's bottom begin_line */
 
@@ -264,13 +263,13 @@ struct editor {
 	unsigned rows, columns;
 	int crow, ccol;    /* cursor row/column on screen */
 	int offset;        /* columns scrolled left */
-	char *screenbegin; /* top-left of viewport into text[] */
+	int screenbegin;   /* offset of the first line on screen */
 	char *screen;      /* virtual screen buffer */
 	int screensize;
 	int screen_line_size;
 	int have_status_msg; /* must be int — do not shrink */
 	int last_status_cksum;
-	char *refresh_last_screenbegin;
+	int refresh_last_screenbegin;
 	int refresh_last_modified_count;
 	int refresh_last_highlight_hash; /* hash of highlight_pattern at last render */
 	int line_count_cache;
@@ -299,7 +298,7 @@ struct editor {
 	unsigned int ydreg; /* default yank/delete register index */
 	char *reg[29];      /* a-z (0-25), D (26), U (27), shared (28) */
 	char regtype[29];   /* WHOLE, MULTI, or PARTIAL for each register */
-	char *mark[30];     /* a-z (0-25), context (26), prev-context (27), '<(28), '>(29) */
+	int mark[30];       /* a-z (0-25), context (26), prev-context (27), '<(28), '>(29); -1 unset */
 
 	/* --- Signals --- */
 	volatile sig_atomic_t need_winch;
@@ -331,7 +330,7 @@ struct editor {
 		char undo_text[1];
 	} *undo_stack_tail;
 	struct undo_object *redo_stack_tail;
-	char *undo_queue_spos; /* start position of queued operation */
+	int undo_queue_spos;   /* start offset of queued operation, or -1 */
 	int undo_q;
 	char undo_queue[UNDO_QUEUE_MAX];
 
@@ -344,7 +343,7 @@ struct editor {
 	sigjmp_buf restart; /* int_handler() longjmps here */
 
 	/* --- Scratch (promoted from file-scope statics) --- */
-	char *dot_line;
+	int dot_line;     /* offset of the line saved for U, or -1 */
 	int scr_old_offset;
 	int status_tot;
 
@@ -435,8 +434,8 @@ int get_motion_char(struct editor *g);
 void do_cmd(struct editor *g, int c, const struct cmd_ctx *ctx);
 void edit_file(struct editor *g, char *fn);
 void process_pending_signals(struct editor *g);
-void sync_cursor(struct editor *g, char *d, int *row, int *col);
-char *find_pair(struct editor *g, char *p, char c);
-void showmatching(struct editor *g, char *p);
+void sync_cursor(struct editor *g, int d, int *row, int *col);
+int find_pair(struct editor *g, int p, char c);
+void showmatching(struct editor *g, int p);
 
 #endif /* VI_H */

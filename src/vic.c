@@ -18,6 +18,7 @@
 #include "session.h"
 #include "status.h"
 #include "term.h"
+#include "text.h"
 #include "textobj.h"
 #include "undo.h"
 #include "utf8.h"
@@ -90,7 +91,7 @@ show_help(void)
 }
 
 void
-sync_cursor(struct editor *g, char *d, int *row, int *col)
+sync_cursor(struct editor *g, int d, int *row, int *col)
 {
 	/*
 	 * == Scroll screenbegin so d is visible and compute its screen row/col ==
@@ -103,8 +104,8 @@ sync_cursor(struct editor *g, char *d, int *row, int *col)
 	 * Writes the resulting 0-based screen row into *row and screen column
 	 * into *col.
 	 */
-	char *beg_cur;
-	char *tp;
+	int beg_cur;
+	int tp;
 	int cnt, ro, co;
 	int text_cols;
 
@@ -120,7 +121,7 @@ sync_cursor(struct editor *g, char *d, int *row, int *col)
 				g->screenbegin = prev_line(g, g->screenbegin);
 		}
 	} else {
-		char *end_scr = end_screen(g);
+		int end_scr = end_screen(g);
 		if (beg_cur > end_scr) {
 			cnt = count_lines(g, end_scr, beg_cur);
 			if (cnt > (int)((g->rows - 1) / 2))
@@ -159,7 +160,7 @@ sync_cursor(struct editor *g, char *d, int *row, int *col)
 		g->offset = co;
 	if (co >= text_cols + g->offset)
 		g->offset = co - text_cols + 1;
-	if (d == beg_cur && *d == '\t')
+	if (d == beg_cur && text_char(g, d) == '\t')
 		g->offset = 0;
 	co -= g->offset;
 
@@ -242,15 +243,15 @@ reset_ydreg(struct editor *g)
 	g->adding2q = 0;
 }
 
-char *
-find_pair(struct editor *g, char *p, const char c)
+int
+find_pair(struct editor *g, int p, const char c)
 {
 	/*
 	 * == Find the matching bracket for the bracket character at p ==
 	 *
 	 * Handles the pairs ()  []  {}  <>.  Searches forward for open brackets
 	 * and backward for close brackets, tracking nesting level.
-	 * Returns a pointer to the matching bracket, or NULL if not found or if
+	 * Returns the offset of the matching bracket, or -1 if not found or if
 	 * c is not a recognised bracket character.
 	 */
 	(void)g;
@@ -262,7 +263,7 @@ find_pair(struct editor *g, char *p, const char c)
 
 	hit = strchr(braces, c);
 	if (hit == NULL)
-		return NULL;
+		return -1;
 
 	dir = hit - braces;
 	dir ^= 1;
@@ -272,11 +273,11 @@ find_pair(struct editor *g, char *p, const char c)
 	level = 1;
 	for (;;) {
 		p += dir;
-		if (p < g->text || p >= g->end)
-			return NULL;
-		if (*p == c)
+		if (p < 0 || p >= text_len(g))
+			return -1;
+		if (text_char(g, p) == c)
 			level++;
-		if (*p == match) {
+		if (text_char(g, p) == match) {
 			level--;
 			if (level == 0)
 				return p;
@@ -285,7 +286,7 @@ find_pair(struct editor *g, char *p, const char c)
 }
 
 void
-showmatching(struct editor *g, char *p)
+showmatching(struct editor *g, int p)
 {
 	/*
 	 * == Briefly move the cursor to the matching bracket and bounce back ==
@@ -294,10 +295,10 @@ showmatching(struct editor *g, char *p)
 	 * dot there, redraws, pauses 40 ms, then restores dot and redraws again
 	 * — giving a brief visual highlight.  Rings the error bell if no match.
 	 */
-	char *q, *save_dot;
+	int q, save_dot;
 
-	q = find_pair(g, p, *p);
-	if (q == NULL) {
+	q = find_pair(g, p, text_char(g, p));
+	if (q == -1) {
 		indicate_error(g);
 	} else {
 		save_dot = g->dot;
@@ -455,13 +456,13 @@ run_match_pair_cmd(struct editor *g)
 	 * line, then calls find_pair() to locate its match.  Moves dot there, or
 	 * signals an error if no bracket is found or there is no matching bracket.
 	 */
-	char *p;
-	char *q;
+	int p;
+	int q;
 
-	for (q = g->dot; q < g->end && *q != '\n'; q++) {
-		if (strchr("()[]{}", *q) != NULL) {
-			p = find_pair(g, q, *q);
-			if (p == NULL) {
+	for (q = g->dot; q < text_len(g) && text_char(g, q) != '\n'; q++) {
+		if (strchr("()[]{}", text_char(g, q)) != NULL) {
+			p = find_pair(g, q, text_char(g, q));
+			if (p == -1) {
 				indicate_error(g);
 			} else {
 				g->dot = p;
@@ -566,8 +567,8 @@ run_undo_line_cmd(struct editor *g)
 	 * which is updated each time dot moves to a new line.  Leaves dot at the
 	 * first non-blank character.  Does nothing if ureg is empty.
 	 */
-	char *p;
-	char *q;
+	int p;
+	int q;
 
 	if (g->reg[ureg] == NULL)
 		return;
@@ -654,7 +655,7 @@ run_set_mark_cmd(struct editor *g, const struct cmd_ctx *ctx)
 }
 
 static void
-run_jump_mark_cmd(struct editor *g, char **orig_dot, const struct cmd_ctx *ctx)
+run_jump_mark_cmd(struct editor *g, int *orig_dot, const struct cmd_ctx *ctx)
 {
 	/*
 	 * == '{a-z} — jump to a named mark ==
@@ -665,7 +666,7 @@ run_jump_mark_cmd(struct editor *g, char **orig_dot, const struct cmd_ctx *ctx)
 	 * updates *orig_dot.  Signals an error for unknown mark letters or if the
 	 * mark points outside the buffer.
 	 */
-	char *q;
+	int q;
 	int c1;
 
 	c1 = (ctx && ctx->anchor) ? (int)(unsigned char)ctx->anchor : get_one_char(g);
@@ -673,7 +674,7 @@ run_jump_mark_cmd(struct editor *g, char **orig_dot, const struct cmd_ctx *ctx)
 	if ((unsigned)(c1 - 'a') <= 25) {
 		c1 = (c1 - 'a');
 		q = g->mark[c1];
-		if (g->text <= q && q < g->end) {
+		if (0 <= q && q < text_len(g)) {
 			g->dot = q;
 			dot_begin(g);
 			dot_skip_over_ws(g);
@@ -700,9 +701,9 @@ run_delete_key_cmd(struct editor *g)
 	 * newline.  Uses yank_delete_current so the deleted text goes into the
 	 * register.
 	 */
-	if (g->dot < g->end - 1 && *g->dot != '\n') {
-		char *start = cp_start(g, g->dot);
-		char *stop = cp_end(g, start) - 1;
+	if (g->dot < text_len(g) - 1 && text_char(g, g->dot) != '\n') {
+		int start = cp_start(g, g->dot);
+		int stop = cp_end(g, start) - 1;
 		g->dot = yank_delete_current(g, start, stop, PARTIAL, YANKDEL, ALLOW_UNDO);
 	}
 }
@@ -823,11 +824,11 @@ run_zz_cmd(struct editor *g, const struct cmd_ctx *ctx)
 			status_line_bold(g, "'%s' is read only", g->current_filename);
 			return;
 		}
-		cnt = file_write(g, g->current_filename, g->text, g->end - 1);
+		cnt = file_write(g, g->current_filename, 0, text_len(g) - 1);
 		if (cnt < 0) {
 			if (cnt == -1)
 				status_line_bold(g, "Write error: %s", strerror(errno));
-		} else if (cnt == (g->end - 1 - g->text + 1)) {
+		} else if (cnt == text_len(g)) {
 			g->editing = 0;
 		}
 	} else {
@@ -876,8 +877,8 @@ do_put(struct editor *g, int before)
 		if (before) {
 			dot_begin(g);
 		} else {
-			if (end_line(g, g->dot) == (g->end - 1)) {
-				g->dot = g->end;
+			if (end_line(g, g->dot) == (text_len(g) - 1)) {
+				g->dot = text_len(g);
 			} else {
 				dot_next(g);
 			}
@@ -952,14 +953,14 @@ do_shift(struct editor *g, const struct cmd_ctx *ctx)
 	 * are chained into one undo entry.  Leaves dot at the first non-blank
 	 * of the first affected line.
 	 */
-	char *p;
-	char *q;
+	int p;
+	int q;
 	int allow_undo;
 	int cnt;
 	int i;
 	int j;
 
-	cnt = count_lines(g, g->text, g->dot);
+	cnt = count_lines(g, 0, g->dot);
 	if (range_find(g, &p, &q, ctx) == -1) {
 		reset_ydreg(g);
 		return;
@@ -968,10 +969,10 @@ do_shift(struct editor *g, const struct cmd_ctx *ctx)
 	i = count_lines(g, p, q);
 	for (p = begin_line(g, p); i > 0; i--, p = next_line(g, p)) {
 		if (ctx->op == '<') {
-			if (*p == '\t') {
+			if (text_char(g, p) == '\t') {
 				text_hole_delete(g, p, p, allow_undo);
-			} else if (*p == ' ') {
-				for (j = 0; *p == ' ' && j < g->tabstop; j++) {
+			} else if (text_char(g, p) == ' ') {
+				for (j = 0; text_char(g, p) == ' ' && j < g->tabstop; j++) {
 					text_hole_delete(g, p, p, allow_undo);
 					allow_undo = ALLOW_UNDO_CHAIN;
 				}
@@ -1194,15 +1195,15 @@ handle_replace_key(struct editor *g, int c)
 		edit_run_start_insert_cmd(g);
 		return 1;
 	}
-	if (*g->dot == '\n') {
+	if (text_char(g, g->dot) == '\n') {
 		g->cmd_mode = 1; /* past EOL: fall into insert */
 		undo_queue_commit(g);
 		return 0;
 	}
 	if (1 <= c || Isprint(c)) {
 		if (c != 27 && !(c == g->term_orig.c_cc[VERASE] || c == 8 || c == 127)) {
-			char *start = cp_start(g, g->dot);
-			char *stop = cp_end(g, start) - 1;
+			int start = cp_start(g, g->dot);
+			int stop = cp_end(g, start) - 1;
 			g->dot = yank_delete_current(g, start, stop, PARTIAL, YANKDEL, ALLOW_UNDO);
 		}
 		g->dot = char_insert(g, g->dot, c, ALLOW_UNDO_CHAIN);
@@ -1228,7 +1229,7 @@ handle_insert_key(struct editor *g, int c)
 
 static void
 handle_visual_key(struct editor *g, int c, const struct cmd_ctx *ctx,
-                  char **orig_dot)
+                  int *orig_dot)
 {
 	if (c == ASCII_ESC) {
 		visual_leave(g);
@@ -1249,7 +1250,7 @@ handle_visual_key(struct editor *g, int c, const struct cmd_ctx *ctx,
 		else {
 			g->visual_mode = 2;
 			g->visual_anchor =
-			    begin_line(g, g->visual_anchor ? g->visual_anchor : g->dot);
+			    begin_line(g, g->visual_anchor >= 0 ? g->visual_anchor : g->dot);
 			g->dot = begin_line(g, g->dot);
 			g->last_status_cksum = 0;
 		}
@@ -1264,7 +1265,7 @@ handle_visual_key(struct editor *g, int c, const struct cmd_ctx *ctx,
 		return;
 	}
 	if (in_set(c, "oO")) {
-		char *tmp = g->dot;
+		int tmp = g->dot;
 		g->dot = g->visual_anchor;
 		g->visual_anchor = tmp;
 		if (g->visual_mode == 2) {
@@ -1279,7 +1280,7 @@ handle_visual_key(struct editor *g, int c, const struct cmd_ctx *ctx,
 	}
 	if (c == 'I' && g->visual_mode == 3) {
 		int col_left, col_right;
-		char *row_top, *row_bot;
+		int row_top, row_bot;
 
 		block_visual_cols(g, &col_left, &col_right, &row_top,
 		                  &row_bot);
@@ -1287,9 +1288,9 @@ handle_visual_key(struct editor *g, int c, const struct cmd_ctx *ctx,
 		g->dot = move_to_col(g, row_top, col_left);
 		g->vis_block_insert_active = 1;
 		g->vis_block_insert_col = col_left;
-		g->vis_block_insert_start_off = (int)(g->dot - g->text);
-		g->vis_block_row_top_off = (int)(row_top - g->text);
-		g->vis_block_row_bot_off = (int)(row_bot - g->text);
+		g->vis_block_insert_start_off = g->dot;
+		g->vis_block_row_top_off = row_top;
+		g->vis_block_row_bot_off = row_bot;
 		edit_run_start_insert_cmd(g);
 		return;
 	}
@@ -1311,7 +1312,7 @@ handle_visual_key(struct editor *g, int c, const struct cmd_ctx *ctx,
 
 static void
 handle_normal_key(struct editor *g, int c, const struct cmd_ctx *ctx,
-                  char **orig_dot)
+                  int *orig_dot)
 {
 	if (dispatch_cmd(g, c, ctx))
 		return;
@@ -1341,7 +1342,7 @@ do_cmd(struct editor *g, int c, const struct cmd_ctx *ctx)
 	 * Arrow/page/delete keys always route to the Normal-mode handler,
 	 * regardless of current mode.
 	 */
-	char *orig_dot = g->dot;
+	int orig_dot = g->dot;
 	int route_to_normal;
 	int cnt;
 
@@ -1373,13 +1374,13 @@ do_cmd(struct editor *g, int c, const struct cmd_ctx *ctx)
 	handle_normal_key(g, c, ctx, &orig_dot);
 
 epilogue:
-	if (g->end == g->text) {
+	if (text_len(g) == 0) {
 		/* buffer became empty — restore the sentinel newline */
-		char_insert(g, g->text, '\n', NO_UNDO);
-		g->dot = g->text;
+		char_insert(g, 0, '\n', NO_UNDO);
+		g->dot = 0;
 	}
-	/* dot may equal end (one past last char); otherwise clamp it */
-	if (g->dot != g->end)
+	/* dot may equal text_len (one past last char); otherwise clamp it */
+	if (g->dot != text_len(g))
 		g->dot = bound_dot(g, g->dot);
 	if (g->dot != orig_dot)
 		check_context(g, c);
@@ -1388,7 +1389,7 @@ epilogue:
 		g->cmdcnt = 0;
 	cnt = g->dot - begin_line(g, g->dot);
 	/* keep dot off the newline in normal mode */
-	if (*g->dot == '\n' && cnt > 0 && g->cmd_mode == 0)
+	if (text_char(g, g->dot) == '\n' && cnt > 0 && g->cmd_mode == 0)
 		g->dot = cp_prev(g, g->dot);
 }
 
@@ -1474,7 +1475,7 @@ edit_file(struct editor *g, char *fn)
 	init_text_buffer(g, fn);
 
 	g->ydreg = 26;
-	g->mark[MARK_CONTEXT] = g->mark[MARK_PREV_CONTEXT] = g->text;
+	g->mark[MARK_CONTEXT] = g->mark[MARK_PREV_CONTEXT] = 0;
 	g->crow = 0;
 	g->ccol = 0;
 
@@ -1485,14 +1486,14 @@ edit_file(struct editor *g, char *fn)
 	signal(SIGTSTP, tstp_handler);
 	sig = sigsetjmp(g->restart, 1);
 	if (sig != 0) {
-		g->screenbegin = g->dot = g->text;
+		g->screenbegin = g->dot = 0;
 	}
 	/* int_handler() longjmps to restart; install after restart is ready */
 	signal(SIGINT, int_handler);
 
 	g->cmd_mode = 0;
 	g->visual_mode = 0;
-	g->visual_anchor = NULL;
+	g->visual_anchor = -1;
 	g->vis_block_insert_active = 0;
 	g->cmdcnt = 0;
 	g->offset = 0;
@@ -1531,7 +1532,7 @@ edit_file(struct editor *g, char *fn)
 		 */
 		if (g->cmd_mode == 0 && g->visual_mode) {
 			if (g->vis_ai_pending) {
-				char *start, *stop;
+				int start, stop;
 				int buftype;
 				if (textobj_find_range(g, g->vis_ai_pending, c,
 				                       &start, &stop, &buftype) == 0) {
