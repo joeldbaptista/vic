@@ -46,7 +46,7 @@ UNIT_TESTS = tests/test_pt tests/test_utf8 tests/test_line tests/test_codepoint 
              tests/test_editcmd tests/test_operator tests/test_status \
              tests/test_visual tests/test_run \
              tests/test_session tests/test_screen \
-             tests/test_ex tests/test_vic \
+             tests/test_ex tests/test_vic tests/test_parser \
              tests/test_color_c tests/test_color_py \
              tests/test_color_sh tests/test_color_md tests/test_color_sql \
              tests/test_color_docker tests/test_color_yaml \
@@ -64,6 +64,10 @@ tests/test_utf8: tests/test_utf8.c src/utf8.c
 # line.c calls memrchr, which compat.c supplies on platforms lacking it.
 tests/test_line: tests/test_line.c src/line.c src/compat.c src/pt.c src/text.c
 	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_line.c src/line.c src/compat.c src/pt.c src/text.c
+
+# parser.c includes nothing but parser.h, so the test links it alone.
+tests/test_parser: tests/test_parser.c src/parser.c
+	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_parser.c src/parser.c
 
 tests/test_compat: tests/test_compat.c src/compat.c
 	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_compat.c src/compat.c
@@ -203,19 +207,26 @@ tests/test_color_make: tests/test_color_make.c src/color_make.c src/color.c src/
 tests/test_color_awk: tests/test_color_awk.c src/color_awk.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_docker.c src/color_yaml.c src/color_tf.c src/color_make.c src/color_generic.c
 	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_awk.c src/color_awk.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_docker.c src/color_yaml.c src/color_tf.c src/color_make.c src/color_generic.c
 
-check-unit: $(UNIT_TESTS)
+# Build and run every unit test.  All of them run before the rule
+# reports, so one broken module does not hide the state of the rest; the
+# exit status is non-zero if any of them failed.
+unit-tests: $(UNIT_TESTS)
 	@failed=0; \
 	for t in $(UNIT_TESTS); do \
 	    ./$$t || failed=1; \
 	done; \
 	exit $$failed
 
+# check-unit is the older name for the same thing, kept so that `make
+# check` and existing habits keep working.
+check-unit: unit-tests
+
 CHECKS = check-unit check-star-hash-pty check-regression-pty \
          check-asan-pty check-ubsan-pty check-sanitizers-pty
 
 check: $(CHECKS)
 
-.PHONY: check $(CHECKS)
+.PHONY: check unit-tests $(CHECKS)
 
 frmt:
 	clang-format -i src/*.c src/*.h tools/*.c
