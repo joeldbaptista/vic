@@ -11,7 +11,7 @@
  *                            machinery.
  *
  * char_search()         — character search within a line (f F t T);
- *                            returns the target pointer or NULL.
+ *                            returns the target offset or -1.
  *
  * get_input_line()      — prompts for user input on the status line
  *                            (used for :, /, ? prompts).
@@ -28,6 +28,7 @@
 #include "screen.h"
 #include "status.h"
 #include "term.h"
+#include "text.h"
 #include "utf8.h"
 
 enum {
@@ -89,8 +90,8 @@ get_input_line(struct editor *g, const char *prompt)
 	return buf;
 }
 
-char *
-char_search(struct editor *g, char *p, const char *pat,
+int
+char_search(struct editor *g, int p, const char *pat,
             int dir_and_range)
 {
 	/*
@@ -103,7 +104,9 @@ char_search(struct editor *g, char *p, const char *pat,
 	 *
 	 * For backward searches, scans line by line and keeps re-matching
 	 * within each segment to find the rightmost occurrence.
-	 * Returns a pointer to the match start in the buffer, or NULL if no
+	 * Each line segment is copied out of the text, matched, and the match
+	 * offsets are translated back to text offsets.
+	 * Returns the offset of the match start in the buffer, or -1 if no
 	 * match is found.  The pattern is compiled with REG_EXTENDED |
 	 * REG_NEWLINE, plus REG_ICASE when ignorecase is set.
 	 */
@@ -111,14 +114,14 @@ char_search(struct editor *g, char *p, const char *pat,
 	regmatch_t m;
 	int flags;
 	int full;
-	char *region_start;
-	char *region_end;
-	char *line;
-	char *eol;
-	char *seg_end;
-	char *result = NULL;
-	char *cur;
-	char save;
+	int region_start;
+	int region_end;
+	int line;
+	int eol;
+	int seg_end;
+	int result = -1;
+	int cur;
+	char *buf;
 
 	flags = REG_EXTENDED | REG_NEWLINE;
 	if (g->setops & VI_IGNORECASE)
@@ -132,33 +135,31 @@ char_search(struct editor *g, char *p, const char *pat,
 
 	if (dir_and_range > 0) {
 		/* Forward: find first match at or after p. */
-		region_end = full ? g->end - 1 : next_line(g, p);
+		region_end = full ? text_len(g) - 1 : next_line(g, p);
 		for (line = p; line < region_end; line = next_line(g, eol)) {
 			int eflags = 0;
 
 			eol = end_line(g, line);
 			if (eol > region_end)
 				eol = region_end;
-			save = *eol;
-			*eol = '\0';
-			if (line != g->text && line[-1] != '\n')
+			buf = text_copy(g, line, eol - line);
+			if (line != 0 && text_char(g, line - 1) != '\n')
 				eflags = REG_NOTBOL;
-			if (regexec(&preg, line, 1, &m, eflags) == 0) {
+			if (regexec(&preg, buf, 1, &m, eflags) == 0) {
 				result = line + m.rm_so;
-				*eol = save;
+				free(buf);
 				break;
 			}
-			*eol = save;
+			free(buf);
 		}
 	} else {
 		/* Backward: find last match before p. */
-		region_start = full ? g->text : prev_line(g, p);
+		region_start = full ? 0 : prev_line(g, p);
 		for (line = region_start; line < p; line = next_line(g, eol)) {
 			eol = end_line(g, line);
 			seg_end = eol < p ? eol : p;
-			save = *seg_end;
-			*seg_end = '\0';
-			if (regexec(&preg, line, 1, &m, 0) == 0) {
+			buf = text_copy(g, line, seg_end - line);
+			if (regexec(&preg, buf, 1, &m, 0) == 0) {
 				/* Walk forward within segment; keep last match. */
 				cur = line;
 				do {
@@ -166,9 +167,10 @@ char_search(struct editor *g, char *p, const char *pat,
 					cur = result +
 					    (m.rm_eo > m.rm_so ? m.rm_eo - m.rm_so : 1);
 				} while (cur < seg_end &&
-				         regexec(&preg, cur, 1, &m, REG_NOTBOL) == 0);
+				         regexec(&preg, buf + (cur - line), 1, &m,
+				                 REG_NOTBOL) == 0);
 			}
-			*seg_end = save;
+			free(buf);
 		}
 	}
 
@@ -192,26 +194,28 @@ make_word_search_pattern(struct editor *g, char dir_prefix,
 	 * Returns NULL if dot is not on a word character.  The caller is
 	 * responsible for freeing the returned string.
 	 */
-	char *p = cp_start(g, g->dot);
-	char *start;
-	char *end;
+	int p = cp_start(g, g->dot);
+	int start;
+	int end;
 	char *pattern;
 	char *dst;
 	size_t word_len;
 
-	if (p >= g->end || *p == '\n' || !is_word_byte((unsigned char)*p))
+	if (p >= text_len(g) || text_char(g, p) == '\n' ||
+	    !is_word_byte((unsigned char)text_char(g, p)))
 		return NULL;
 
 	start = p;
-	while (start > g->text) {
-		char *prev = cp_prev(g, start);
-		if (!is_word_byte((unsigned char)*prev))
+	while (start > 0) {
+		int prev = cp_prev(g, start);
+		if (!is_word_byte((unsigned char)text_char(g, prev)))
 			break;
 		start = prev;
 	}
 
 	end = cp_next(g, p);
-	while (end < g->end && *end != '\n' && is_word_byte((unsigned char)*end))
+	while (end < text_len(g) && text_char(g, end) != '\n' &&
+	       is_word_byte((unsigned char)text_char(g, end)))
 		end = cp_next(g, end);
 
 	word_len = (size_t)(end - start);
@@ -221,7 +225,7 @@ make_word_search_pattern(struct editor *g, char dir_prefix,
 	 * For words containing multi-byte UTF-8 characters (Georgian, Russian,
 	 * Greek, …) the anchors never match, so suppress them.
 	 */
-	if (whole_word && (unsigned char)*start >= UTF8_MULTIBYTE_MIN)
+	if (whole_word && (unsigned char)text_char(g, start) >= UTF8_MULTIBYTE_MIN)
 		whole_word = 0;
 	pattern = xmalloc(word_len + (whole_word ? 6 : 2));
 	dst = pattern;
@@ -230,7 +234,7 @@ make_word_search_pattern(struct editor *g, char dir_prefix,
 		*dst++ = '\\';
 		*dst++ = '<';
 	}
-	memcpy(dst, start, word_len);
+	text_read(g, start, (int)word_len, dst);
 	dst += word_len;
 	if (whole_word) {
 		*dst++ = '\\';
@@ -286,7 +290,8 @@ search_run_cmd(struct editor *g, const struct cmd_ctx *ctx)
 	 * wraps around from the opposite buffer end.  Reports wrap-around and
 	 * "Pattern not found" via status_line_bold.  Repeats g->cmdcnt times.
 	 */
-	char *q;
+	int q;
+	char *input;
 	int dir;
 	int c = (int)(unsigned char)ctx->op;
 
@@ -310,15 +315,15 @@ search_run_cmd(struct editor *g, const struct cmd_ctx *ctx)
 			/* interactive input (visual mode, no parser) */
 			char prompt[2] = {(char)c, '\0'};
 
-			q = get_input_line(g, prompt);
-			if (q == NULL || !q[0])
+			input = get_input_line(g, prompt);
+			if (input == NULL || !input[0])
 				return;
-			if (!q[1]) {
+			if (!input[1]) {
 				if (g->last_search_pattern[0])
 					g->last_search_pattern[0] = (char)c;
 			} else {
 				free(g->last_search_pattern);
-				g->last_search_pattern = xstrdup(q);
+				g->last_search_pattern = xstrdup(input);
 			}
 		}
 		c = 'n';
@@ -336,17 +341,17 @@ search_run_cmd(struct editor *g, const struct cmd_ctx *ctx)
 	}
 
 	do {
-		char *search_from =
+		int search_from =
 		    (dir == FORWARD) ? cp_next(g, g->dot) : cp_prev(g, g->dot);
 		q = char_search(g, search_from, g->last_search_pattern + 1,
 		                (dir * 2) | FULL);
-		if (q != NULL) {
+		if (q != -1) {
 			g->dot = q;
 		} else {
 			const char *msg;
-			q = char_search(g, dir == FORWARD ? g->text : g->end - 1,
+			q = char_search(g, dir == FORWARD ? 0 : text_len(g) - 1,
 			                g->last_search_pattern + 1, (dir * 2) | FULL);
-			if (q != NULL) {
+			if (q != -1) {
 				g->dot = q;
 				msg = "search hit %s, continuing at %s";
 			} else {
