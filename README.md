@@ -5,13 +5,13 @@ BusyBox and rewritten toward the suckless ideal: small source, no
 dependencies, predictable behaviour, and a codebase a single programmer
 can hold in their head.
 
-The text buffer is a plain dynamic array — one contiguous heap slab. There
-is no gap buffer, no rope, no piece table. Rob Pike's rules apply: keep the
-data structure simple, and the algorithms follow naturally. `data/erv.txt`,
-a 31 000-line file included in the repository, edits responsively with no
-perceptible lag. For the actual use cases of `vic` — source files, configuration
-files, prose — the array is fast enough, and the complexity that a fancier 
-structure would introduce is not justified.
+On the `piece-tree-experiment` branch the text buffer is a piece tree: the
+loaded file stays in one read-only buffer, typed text goes to an
+append-only buffer, and a balanced binary tree of pieces records which
+bytes of the two buffers form the text, in order.  An edit splits and
+joins pieces instead of moving the bytes after the edit point, and every
+position in the text is a byte offset.  The `main` branch keeps the plain
+dynamic array.
 
 ## Background
 
@@ -218,11 +218,11 @@ Languages and names:
 ### Philosophy
 
 The project follows [Rob Pike's five programming rules](PRINCIPLES.md). Rule 3
-and Rule 4 govern the data structure choice: a plain dynamic array is the
-simplest correct representation of a text buffer. A gap buffer or rope would
-reduce the asymptotic cost of edits in large files, but Pike's rules say
-not to pay that complexity cost until measurement demands it. For the files
-people actually edit, the array is fine.
+and Rule 4 govern the data structure choice.  The `main` branch uses a plain
+dynamic array, the simplest correct representation of a text buffer.  This
+branch tries a piece tree, which is a binary tree of pieces, one of the
+data structures Rule 4 lists, so that an edit costs a logarithmic number
+of tree steps instead of a move of every byte after the edit point.
 
 Behaviour is encoded as data where possible — dispatch tables, option
 bitmasks, colorizer function pointers — rather than hardcoded control flow.
@@ -238,17 +238,26 @@ structs, no external dependencies.
 ### Buffer model
 
 ```
-g->text                               g->end
-|                                         |
-[  h  e  l  l  o  \n  w  o  r  l  d  \n ]
-                ^
-               g->dot  (cursor)
+original buffer (the file, never changed)   add buffer (typed text, append-only)
+[ h e l l o \n w o r l d \n ]                [ ,   d e a r ]
+
+pieces, in text order:  orig[0,5)  add[0,6)  orig[5,12)
+text:                   "hello, dear\nworld\n"
 ```
 
-`text`, `end`, and all interior pointers (`dot`, `screenbegin`, `mark[]`)
-are pointers into one heap slab. Insert and delete are O(n) memmove from
-the edit point to `end`. Capacity doubles up to 1 MB then grows by 1 MB
-increments. The sentinel newline at `end - 1` is always maintained.
+`g->pt` is the piece tree (`src/pt.c`).  Its pieces are the nodes of a
+treap, a binary search tree kept balanced by random priorities, and each
+node stores the byte and newline counts of its subtree, so mapping an
+offset to a piece, or a line number to an offset, takes logarithmic time.
+No piece is longer than 4 KiB.
+
+`dot`, `screenbegin`, `mark[]` and every other text position are `int`
+byte offsets; -1 means "no position".  `src/text.c` reads the text
+(`text_char`, `text_find`, `text_copy`, ...) and `src/buffer.c` changes it
+(`text_insert_bytes`, `text_hole_delete`, ...).  Code that needs a
+contiguous string, such as the regex engine and the colorizers, works on a
+copy of one line.  The sentinel newline at offset `text_len() - 1` is
+always maintained.
 
 ### Module structure
 
@@ -257,6 +266,8 @@ vic.c           command dispatch, main loop
 parser.c        MONRAS normal-mode command parser
 screen.c        virtual screen, diff/refresh
 buffer.c        insert, delete, file I/O
+pt.c            piece tree: the text storage
+text.c          read access to the text by offset
 undo.c          undo/redo stack
 operator.c      d/c/y/x/r/~ operators
 motion.c        cursor motions
