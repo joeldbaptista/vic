@@ -5,13 +5,11 @@ BusyBox and rewritten toward the suckless ideal: small source, no
 dependencies, predictable behaviour, and a codebase a single programmer
 can hold in their head.
 
-On the `piece-tree-experiment` branch the text buffer is a piece tree: the
-loaded file stays in one read-only buffer, typed text goes to an
-append-only buffer, and a balanced binary tree of pieces records which
-bytes of the two buffers form the text, in order.  An edit splits and
-joins pieces instead of moving the bytes after the edit point, and every
-position in the text is a byte offset.  The `main` branch keeps the plain
-dynamic array.
+`vic` uses a piece tree as fundamental data structure for the text. Initially
+a dynamic array was utilised but as time went by my curiosity regarding 
+piece trees grow, and I decided to experiment with them. In the back of my
+mind I thought if the effort to change to piece tree is small, and I can test
+the changes, and `vic` keeps its efficiency, I would change the data structure.
 
 ## Background
 
