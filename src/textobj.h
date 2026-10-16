@@ -3,7 +3,7 @@
 
 #include "vic.h"
 
-int textobj_find_range(struct editor *g, int ai_cmd, int obj, char **start,
-                       char **stop, int *buftype);
+int textobj_find_range(struct editor *g, int ai_cmd, int obj, int *start,
+                       int *stop, int *buftype);
 
 #endif
