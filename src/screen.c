@@ -15,6 +15,8 @@
  * Line formatting (format_line) renders one buffer line into a string,
  * inserting line numbers, visual-mode highlighting, tab expansion, and
  * non-printable escapes.  skip_line_to_offset handles horizontal scrolling.
+ * Both read the line from a copy taken out of the text (text_copy), and
+ * compare positions as byte offsets into the text.
  *
  * With 'color-escape' active (:run color-escape) an SGR escape sequence in
  * the buffer occupies no display column and is passed through to the
@@ -32,6 +34,7 @@
 #include "line.h"
 #include "status.h"
 #include "term.h"
+#include "text.h"
 #include "visual.h"
 
 #define ESC "\033"
@@ -191,9 +194,9 @@ esc_sgr_store(struct editor *g, const char *p, int n)
 	g->esc_sgr[n] = '\0';
 }
 
-static char *
-skip_line_to_offset(struct editor *g, char *src, int ofs,
-                    int *co)
+static int
+skip_line_to_offset(struct editor *g, const char *lb, int line_start,
+                    int lend, int src, int ofs, int *co)
 {
 	/*
 	 * == Advance src past the first ofs display columns of the current line ==
@@ -202,13 +205,17 @@ skip_line_to_offset(struct editor *g, char *src, int ofs,
 	 * actual column reached (may exceed ofs when a wide character straddles
 	 * the boundary).  Tabs and multi-byte UTF-8 sequences are accounted for.
 	 * Stops at the end of the buffer or at the line's newline.
+	 *
+	 * src and lend are text offsets; lb holds a copy of the line's bytes
+	 * [line_start, lend), so the byte at offset q is lb[q - line_start].
 	 */
-	while (src < g->end && *src != '\n' && *co < ofs) {
-		unsigned char c = (unsigned char)*src;
+	while (src < lend && lb[src - line_start] != '\n' && *co < ofs) {
+		unsigned char c = (unsigned char)lb[src - line_start];
 
 		if (g->color_escape && c == ASCII_ESC) {
 			int is_sgr = 0;
-			int n = csi_len(src, g->end, &is_sgr);
+			int n = csi_len(lb + (src - line_start), lb + (lend - line_start),
+			                &is_sgr);
 
 			if (n > 0) {
 				/*
@@ -217,18 +224,18 @@ skip_line_to_offset(struct editor *g, char *src, int ofs,
 				 * remains visible, so record it for the prologue.
 				 */
 				if (is_sgr)
-					esc_sgr_store(g, src, n);
+					esc_sgr_store(g, lb + (src - line_start), n);
 				src += n;
 				continue;
 			}
 		}
 
 		if (c >= ' ' && c < ASCII_DEL && c != '\t') {
-			char *run = src;
+			int run = src;
 			int need = ofs - *co;
 
-			while (run < g->end && need > 0) {
-				unsigned char rc = (unsigned char)*run;
+			while (run < lend && need > 0) {
+				unsigned char rc = (unsigned char)lb[run - line_start];
 				if (rc == '\n' || rc == '\t' || rc < ' ' || rc >= ASCII_DEL)
 					break;
 				run++;
@@ -253,8 +260,9 @@ skip_line_to_offset(struct editor *g, char *src, int ofs,
 		}
 
 		{
-			char *next = cp_next(g, src);
-			int width = utf8_cell_width(src, next);
+			int next = cp_next(g, src);
+			int width = utf8_cell_width(lb + (src - line_start),
+			                            lb + (next - line_start));
 			if (width <= 0)
 				width = 1;
 			*co += width;
@@ -266,7 +274,7 @@ skip_line_to_offset(struct editor *g, char *src, int ofs,
 }
 
 static char *
-render_lnum(struct editor *g, char *dest, char *src,
+render_lnum(struct editor *g, char *dest, int src,
             int line_no, int cur_line, unsigned lnum_width)
 {
 	/*
@@ -274,13 +282,13 @@ render_lnum(struct editor *g, char *dest, char *src,
 	 *
 	 * Renders the absolute line number (or relative distance when
 	 * 'relativenumber' is set), right-justified in a field of lnum_width-1
-	 * followed by a space.  Past-end rows (src >= g->end) are left blank.
+	 * followed by a space.  Past-end rows (src >= text_len(g)) are left blank.
 	 * Returns dest + lnum_width.
 	 */
 	if (lnum_width == 0)
 		return dest;
 	memset(dest, ' ', lnum_width);
-	if (src < g->end) {
+	if (src < text_len(g)) {
 		int shown = line_no;
 
 		if (IS_RELATIVENUMBER(g)) {
@@ -297,20 +305,22 @@ render_lnum(struct editor *g, char *dest, char *src,
 }
 
 static int
-scan_line_colors(const struct colorizer *colorizer, char *src, char *end,
+scan_line_colors(const struct colorizer *colorizer, const char *src,
+                 const char *end,
                  char *attrs, int *color_state)
 {
 	/*
 	 * == Colorize one source line and populate attrs[] ==
 	 *
-	 * Calls the colorizer's colorize() function on the slice [src, end).
+	 * Calls the colorizer's colorize() function on the slice [src, end) of
+	 * a line copied out of the text.
 	 * Each byte in attrs[] receives one of the ATTR_* constants.  Updates
 	 * *color_state with the end-of-line colorizer state (needed because
 	 * multi-line constructs such as block comments span line boundaries).
 	 * Returns the number of bytes scanned (up to VI_MAX_LINE).
 	 */
 	int len = 0;
-	char *p = src;
+	const char *p = src;
 
 	while (p < end && *p != '\n' && len < VI_MAX_LINE) {
 		p++;
@@ -361,7 +371,7 @@ scan_line_highlight_attrs(const regex_t *re, const char *src, int len,
 }
 
 static char *
-format_line(struct editor *g, char *src, int line_no, int cur_line,
+format_line(struct editor *g, int src, int line_no, int cur_line,
             unsigned lnum_width, int text_cols,
             const struct colorizer *colorizer,
             int *color_state, const regex_t *hl_re)
@@ -380,13 +390,18 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 	 *
 	 * Past-end rows render as a single '~' in the gutter column.
 	 * Returns g->scr_out_buf.
+	 *
+	 * src is the text offset of the line start.  The line's bytes, with its
+	 * newline, are copied once into lb; the byte at offset q is
+	 * lb[q - line_start], and lend is the offset one past the copy.
+	 * Positions (src, next, the visual bounds) stay text offsets.
 	 */
 	unsigned char c;
 	int co;
 	int shown_cols;
 	int ofs = g->offset;
-	char *vstart = NULL;
-	char *vstop = NULL;
+	int vstart = -1;
+	int vstop = -1;
 	int vbuftype;
 	int cur_in_visual = 0;
 	int cur_in_hl = 0;
@@ -394,32 +409,38 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 	int have_visual = visual_get_range(g, &vstart, &vstop, &vbuftype);
 	(void)vbuftype;
 	int bv_col_left = 0, bv_col_right = 0;
-	char *bv_row_top = NULL, *bv_row_bot_end = NULL;
-	int have_block_visual = (g->visual_mode == 3 && g->visual_anchor != NULL);
+	int bv_row_top = -1, bv_row_bot_end = -1;
+	int have_block_visual = (g->visual_mode == 3 && g->visual_anchor != -1);
 	if (have_block_visual) {
-		char *bv_row_bot;
+		int bv_row_bot;
 		block_visual_cols(g, &bv_col_left, &bv_col_right,
 		                  &bv_row_top, &bv_row_bot);
 		bv_row_bot_end = end_line(g, bv_row_bot);
 	}
 	char *dest = g->scr_out_buf;
 	char *dest_end = dest + sizeof(g->scr_out_buf) - 1;
-	char *line_start = src;
+	int line_start = src;
+	int lend;
+	char *lb;
 	char line_attrs[VI_MAX_LINE];
 	char hl_attrs[VI_MAX_LINE];
 	int line_len = 0;
 
 	dest = render_lnum(g, dest, src, line_no, cur_line, lnum_width);
 
-	if (src >= g->end) {
+	if (src >= text_len(g)) {
 		if (dest < dest_end)
 			*dest++ = '~';
 		*dest = '\0';
 		return g->scr_out_buf;
 	}
 
+	lend = text_find(g, line_start, '\n');
+	lend = lend < 0 ? text_len(g) : lend + 1;
+	lb = text_copy(g, line_start, lend - line_start);
+
 	if (colorizer) {
-		line_len = scan_line_colors(colorizer, line_start, g->end,
+		line_len = scan_line_colors(colorizer, lb, lb + (lend - line_start),
 		                            line_attrs, color_state);
 		/* Emit a reset at the start of each colored line. */
 		if (dest + 3 <= dest_end) {
@@ -429,18 +450,19 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 	}
 	if (hl_re) {
 		if (line_len == 0) {
-			const char *p = line_start;
-			while (p < g->end && *p != '\n' && line_len < VI_MAX_LINE) {
+			const char *p = lb;
+			while (p < lb + (lend - line_start) && *p != '\n' &&
+			       line_len < VI_MAX_LINE) {
 				p++;
 				line_len++;
 			}
 		}
 		if (line_len > 0)
-			scan_line_highlight_attrs(hl_re, line_start, line_len, hl_attrs);
+			scan_line_highlight_attrs(hl_re, lb, line_len, hl_attrs);
 	}
 
 	co = 0;
-	src = skip_line_to_offset(g, src, ofs, &co);
+	src = skip_line_to_offset(g, lb, line_start, lend, src, ofs, &co);
 
 	if (g->color_escape) {
 		/*
@@ -463,19 +485,21 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 
 	shown_cols = 0;
 	while (shown_cols < text_cols) {
-		char *next;
+		int next;
 		int width;
 		int new_visual;
 		int new_hl;
 		int new_attr;
 		int byte_off;
 
-		if (src >= g->end)
+		if (src >= lend)
 			break;
 
-		if (g->color_escape && (unsigned char)*src == ASCII_ESC) {
+		if (g->color_escape &&
+		    (unsigned char)lb[src - line_start] == ASCII_ESC) {
 			int is_sgr = 0;
-			int n = csi_len(src, g->end, &is_sgr);
+			int n = csi_len(lb + (src - line_start), lb + (lend - line_start),
+			                &is_sgr);
 
 			if (n > 0) {
 				/*
@@ -488,10 +512,10 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 				 * the SGR-change block below restores it on exit.
 				 */
 				if (is_sgr) {
-					esc_sgr_store(g, src, n);
+					esc_sgr_store(g, lb + (src - line_start), n);
 					if (!cur_in_visual && !cur_in_hl &&
 					    dest + n <= dest_end) {
-						memcpy(dest, src, (size_t)n);
+						memcpy(dest, lb + (src - line_start), (size_t)n);
 						dest += n;
 					}
 				}
@@ -508,7 +532,7 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 		 * Sending partial UTF-8 to the terminal produces replacement glyphs;
 		 * skipping here lets the render loop reach the '\n' cleanly. */
 		{
-			unsigned char fb = (unsigned char)*src;
+			unsigned char fb = (unsigned char)lb[src - line_start];
 			if (fb >= 0x80) {
 				size_t have = (size_t)(next - src);
 				size_t need = fb < 0xC0 ? 0
@@ -521,7 +545,7 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 			}
 		}
 
-		c = (unsigned char)*src;
+		c = (unsigned char)lb[src - line_start];
 		if (c == '\n')
 			break;
 
@@ -530,7 +554,7 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 			              co >= bv_col_left && co <= bv_col_right) ? 1 : 0;
 		else
 			new_visual = (have_visual && src >= vstart && src <= vstop) ? 1 : 0;
-		byte_off = (int)(src - line_start);
+		byte_off = src - line_start;
 		new_hl = (!new_visual && hl_re && byte_off < line_len &&
 		          hl_attrs[byte_off]) ? 1 : 0;
 		new_attr =
@@ -593,12 +617,13 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 			continue;
 		}
 
-		width = utf8_cell_width(src, next);
+		width = utf8_cell_width(lb + (src - line_start),
+		                        lb + (next - line_start));
 		if (width <= 0) {
 			if (co > ofs && shown_cols > 0) {
 				size_t blen = (size_t)(next - src);
 				if (dest + blen <= dest_end) {
-					memcpy(dest, src, blen);
+					memcpy(dest, lb + (src - line_start), blen);
 					dest += blen;
 				}
 			}
@@ -620,7 +645,7 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 			break;
 
 		if (dest + (next - src) <= dest_end) {
-			memcpy(dest, src, (size_t)(next - src));
+			memcpy(dest, lb + (src - line_start), (size_t)(next - src));
 			dest += (next - src);
 		}
 		co += width;
@@ -644,6 +669,7 @@ format_line(struct editor *g, char *src, int line_no, int cur_line,
 	}
 
 	*dest = '\0';
+	free(lb);
 	return g->scr_out_buf;
 }
 
@@ -687,7 +713,7 @@ refresh(struct editor *g, int full_screen)
 	int line_no = 0;
 	int cur_line = 0;
 	unsigned lnum_width;
-	char *tp;
+	int tp;
 	char *sp;
 	const struct colorizer *colorizer;
 	int color_state;
@@ -729,8 +755,8 @@ refresh(struct editor *g, int full_screen)
 	}
 
 	if (lnum_width != 0) {
-		line_no = count_lines(g, g->text, g->screenbegin);
-		cur_line = count_lines(g, g->text, g->dot);
+		line_no = count_lines(g, 0, g->screenbegin);
+		cur_line = count_lines(g, 0, g->dot);
 	}
 	tp = g->screenbegin;
 
@@ -740,45 +766,77 @@ refresh(struct editor *g, int full_screen)
 	 * opened earlier in the document keeps applying after a scroll.
 	 */
 	if (g->color_escape) {
-		char *p = g->text;
+		int p = 0;
 
 		g->esc_sgr[0] = '\0';
 		while (p < g->screenbegin) {
-			int is_sgr = 0;
-			int n;
+			/*
+			 * Jump to the next ESC, then copy its line from there on
+			 * and scan every escape in the copy that starts before
+			 * screenbegin.  A sequence never spans lines, so the copy
+			 * holds all the bytes csi_len can look at.
+			 */
+			int eol, lim, clen, i;
+			char *s;
 
-			p = memchr(p, ASCII_ESC, (size_t)(g->screenbegin - p));
-			if (p == NULL)
+			p = text_find(g, p, ASCII_ESC);
+			if (p < 0 || p >= g->screenbegin)
 				break;
-			n = csi_len(p, g->end, &is_sgr);
-			if (n <= 0) {
-				p++;
-				continue;
+			eol = text_find(g, p, '\n');
+			if (eol < 0)
+				eol = text_len(g);
+			lim = eol < g->screenbegin ? eol : g->screenbegin;
+			clen = eol - p;
+			s = text_copy(g, p, clen);
+			i = 0;
+			while (p + i < lim) {
+				int is_sgr = 0;
+				int n;
+				const char *e;
+
+				e = memchr(s + i, ASCII_ESC, (size_t)(lim - p - i));
+				if (e == NULL) {
+					i = lim - p;
+					break;
+				}
+				i = (int)(e - s);
+				n = csi_len(s + i, s + clen, &is_sgr);
+				if (n <= 0) {
+					i++;
+					continue;
+				}
+				if (is_sgr)
+					esc_sgr_store(g, s + i, n);
+				i += n;
 			}
-			if (is_sgr)
-				esc_sgr_store(g, p, n);
-			p += n;
+			free(s);
+			p += i;
 		}
 	}
 
 	/* Set up syntax colorizer; pre-scan to get state at the first visible line.
 	 * Call colorize per line with NULL attrs — we only need the returned state.
+	 * Each line is copied out of the text with one byte past llen, which is
+	 * the byte the old in-place call left after the slice.
 	 */
 	colorizer = (IS_SYNTAX(g) && !g->color_escape)
 	                ? colorizer_find(g->current_filename)
 	                : NULL;
 	color_state = 0;
 	if (colorizer) {
-		char *p = g->text;
-		while (p < g->screenbegin && p < g->end) {
-			char *eol = memchr(p, '\n', (size_t)(g->end - p));
+		int p = 0;
+		while (p < g->screenbegin && p < text_len(g)) {
+			int eol = text_find(g, p, '\n');
 			int llen;
-			if (eol == NULL || eol >= g->screenbegin)
+			char *line;
+			if (eol == -1 || eol >= g->screenbegin)
 				eol = g->screenbegin;
-			llen = (int)(eol - p);
+			llen = eol - p;
 			if (llen > VI_MAX_LINE)
 				llen = VI_MAX_LINE;
-			color_state = colorizer->colorize(color_state, p, llen, NULL);
+			line = text_copy(g, p, llen + 1);
+			color_state = colorizer->colorize(color_state, line, llen, NULL);
+			free(line);
 			p = eol + 1;
 		}
 	}
@@ -789,10 +847,10 @@ refresh(struct editor *g, int full_screen)
 		out_buf = format_line(g, tp, line_no, cur_line, lnum_width, text_cols,
 		                      colorizer, &color_state, hl_rep);
 
-		if (tp < g->end) {
-			char *t = memchr(tp, '\n', g->end - tp);
-			if (!t)
-				t = g->end - 1;
+		if (tp < text_len(g)) {
+			int t = text_find(g, tp, '\n');
+			if (t == -1)
+				t = text_len(g) - 1;
 			tp = t + 1;
 			line_no++;
 		}
