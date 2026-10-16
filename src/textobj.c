@@ -9,7 +9,7 @@
  *   find_tag_text_object_range       — t  (XML/HTML <tag>...</tag>)
  *   find_word_text_object_range      — w, W  (inner/around word or WORD)
  *
- * Each returns start/stop buffer pointers.  "inner" (i) excludes the
+ * Each returns start/stop buffer offsets.  "inner" (i) excludes the
  * delimiter/surrounding whitespace; "around" (a) includes it.
  *
  * cmdcnt (e.g. 2iw) causes the range to be extended that many times.
@@ -21,6 +21,7 @@
 
 #include "codepoint.h"
 #include "line.h"
+#include "text.h"
 
 enum word_obj_class {
 	WOBJ_NONE = 0,
@@ -81,8 +82,8 @@ normalize_text_object_delimiter(int obj, char *open)
 
 static int
 find_delimited_text_object_range(struct editor *g, char open,
-                                 int inner, char **start,
-                                 char **stop)
+                                 int inner, int *start,
+                                 int *stop)
 {
 	/*
 	 * == Find the innermost balanced pair enclosing dot ==
@@ -94,42 +95,42 @@ find_delimited_text_object_range(struct editor *g, char open,
 	 * Returns 0 on success with start/stop set; -1 if no enclosing pair
 	 * exists.
 	 */
-	char *scan;
-	char *left = NULL;
-	char *right = NULL;
+	int scan;
+	int left = -1;
+	int right = -1;
 	int repeat = (g->cmdcnt ?: 1);
 
 	scan = g->dot;
 	while (repeat-- > 0) {
-		left = NULL;
-		right = NULL;
+		left = -1;
+		right = -1;
 		for (;;) {
-			if (*scan == open) {
-				char *match = find_pair(g, scan, open);
-				if (match != NULL && match >= g->dot) {
+			if (text_char(g, scan) == open) {
+				int match = find_pair(g, scan, open);
+				if (match != -1 && match >= g->dot) {
 					left = scan;
 					right = match;
 					break;
 				}
 			}
-			if (scan == g->text)
+			if (scan == 0)
 				break;
 			scan = cp_prev(g, scan);
 		}
 
-		if (left == NULL || right == NULL)
+		if (left == -1 || right == -1)
 			return -1;
 
 		if (repeat > 0) {
-			if (left == g->text)
+			if (left == 0)
 				return -1;
 			scan = cp_prev(g, left);
 		}
 	}
 
 	if (inner) {
-		char *inner_start = cp_next(g, left);
-		char *inner_stop = cp_prev(g, right);
+		int inner_start = cp_next(g, left);
+		int inner_stop = cp_prev(g, right);
 
 		if (inner_start > inner_stop)
 			return -1;
@@ -143,7 +144,7 @@ find_delimited_text_object_range(struct editor *g, char open,
 }
 
 static int
-is_escaped_quote(struct editor *g, char *p)
+is_escaped_quote(struct editor *g, int p)
 {
 	/*
 	 * == True if the quote character at p is preceded by an odd number of backslashes ==
@@ -153,9 +154,9 @@ is_escaped_quote(struct editor *g, char *p)
 	 */
 	int backslashes = 0;
 
-	while (p > g->text) {
-		char *prev = cp_prev(g, p);
-		if (*prev != '\\')
+	while (p > 0) {
+		int prev = cp_prev(g, p);
+		if (text_char(g, prev) != '\\')
 			break;
 		backslashes++;
 		p = prev;
@@ -166,7 +167,7 @@ is_escaped_quote(struct editor *g, char *p)
 
 static int
 find_quoted_text_object_range(struct editor *g, char quote,
-                              int inner, char **start, char **stop)
+                              int inner, int *start, int *stop)
 {
 	/*
 	 * == Find the innermost quoted string enclosing or starting at dot ==
@@ -176,51 +177,51 @@ find_quoted_text_object_range(struct editor *g, char quote,
 	 * inner=1 gives the content between the quotes; inner=0 includes them.
 	 * Returns 0 on success, -1 if no enclosing pair is found.
 	 */
-	char *scan;
-	char *left = NULL;
-	char *right = NULL;
+	int scan;
+	int left = -1;
+	int right = -1;
 	int repeat = (g->cmdcnt ?: 1);
 
 	scan = g->dot;
 	while (repeat-- > 0) {
-		left = NULL;
-		right = NULL;
+		left = -1;
+		right = -1;
 
 		for (;;) {
-			if (*scan == quote && !is_escaped_quote(g, scan)) {
+			if (text_char(g, scan) == quote && !is_escaped_quote(g, scan)) {
 				left = scan;
 				break;
 			}
-			if (scan == g->text)
+			if (scan == 0)
 				break;
 			scan = cp_prev(g, scan);
 		}
 
-		if (left == NULL)
+		if (left == -1)
 			return -1;
 
 		scan = cp_next(g, left);
-		while (scan < g->end) {
-			if (*scan == quote && !is_escaped_quote(g, scan)) {
+		while (scan < text_len(g)) {
+			if (text_char(g, scan) == quote && !is_escaped_quote(g, scan)) {
 				right = scan;
 				break;
 			}
 			scan = cp_next(g, scan);
 		}
 
-		if (right == NULL)
+		if (right == -1)
 			return -1;
 
 		if (repeat > 0) {
-			if (left == g->text)
+			if (left == 0)
 				return -1;
 			scan = cp_prev(g, left);
 		}
 	}
 
 	if (inner) {
-		char *inner_start = cp_next(g, left);
-		char *inner_stop = cp_prev(g, right);
+		int inner_start = cp_next(g, left);
+		int inner_stop = cp_prev(g, right);
 
 		if (inner_start > inner_stop)
 			return -1;
@@ -243,11 +244,13 @@ is_tag_name_char(unsigned char ch)
 }
 
 static int
-tag_name_equal(const char *a, size_t alen, const char *b,
+tag_name_equal(struct editor *g, int a, size_t alen, int b,
                size_t blen)
 {
 	/*
-	 * == Case-insensitive comparison of two tag name byte slices ==
+	 * == Case-insensitive comparison of two tag names in the text ==
+	 *
+	 * a and b are the offsets of the two names.
 	 *
 	 * Returns 1 if the names are the same length and equal under
 	 * tolower(); 0 otherwise.
@@ -258,7 +261,8 @@ tag_name_equal(const char *a, size_t alen, const char *b,
 		return 0;
 
 	for (i = 0; i < alen; i++) {
-		if (tolower((unsigned char)a[i]) != tolower((unsigned char)b[i]))
+		if (tolower((unsigned char)text_char(g, a + (int)i)) !=
+		    tolower((unsigned char)text_char(g, b + (int)i)))
 			return 0;
 	}
 
@@ -266,15 +270,15 @@ tag_name_equal(const char *a, size_t alen, const char *b,
 }
 
 static int
-parse_tag_at(struct editor *g, char *lt, char **gt,
-             char **name_start, size_t *name_len, int *is_closing,
+parse_tag_at(struct editor *g, int lt, int *gt,
+             int *name_start, size_t *name_len, int *is_closing,
              int *is_self_closing)
 {
 	/*
 	 * == Parse an HTML/XML tag starting at lt ==
 	 *
-	 * lt must point to a '<' byte.  On success:
-	 *   *gt          — pointer to the closing '>'
+	 * lt must be the offset of a '<' byte.  On success:
+	 *   *gt          — offset of the closing '>'
 	 *   *name_start  — start of the tag name (past '<' or '</')
 	 *   *name_len    — byte length of the tag name
 	 *   *is_closing  — 1 if this is a </tag>, 0 for <tag>
@@ -282,61 +286,61 @@ parse_tag_at(struct editor *g, char *lt, char **gt,
 	 * Returns 1 on success, 0 if lt does not start a valid element tag
 	 * (e.g. declarations, processing instructions, malformed markup).
 	 */
-	char *p;
+	int p;
 	int in_quote = 0;
 	char quote = '\0';
 
-	if (lt >= g->end || *lt != '<')
+	if (lt >= text_len(g) || text_char(g, lt) != '<')
 		return 0;
 
 	p = lt + 1;
-	if (p >= g->end)
+	if (p >= text_len(g))
 		return 0;
 
 	*is_closing = 0;
-	if (*p == '/') {
+	if (text_char(g, p) == '/') {
 		*is_closing = 1;
 		p++;
-		if (p >= g->end)
+		if (p >= text_len(g))
 			return 0;
 	}
 
-	if (*p == '!' || *p == '?')
+	if (text_char(g, p) == '!' || text_char(g, p) == '?')
 		return 0;
 
-	if (!is_tag_name_char((unsigned char)*p))
+	if (!is_tag_name_char((unsigned char)text_char(g, p)))
 		return 0;
 
 	*name_start = p;
-	while (p < g->end && is_tag_name_char((unsigned char)*p))
+	while (p < text_len(g) && is_tag_name_char((unsigned char)text_char(g, p)))
 		p++;
 	*name_len = p - *name_start;
 
-	while (p < g->end) {
+	while (p < text_len(g)) {
 		if (in_quote) {
-			if (*p == quote && !is_escaped_quote(g, p))
+			if (text_char(g, p) == quote && !is_escaped_quote(g, p))
 				in_quote = 0;
 		} else {
-			if (*p == '"' || *p == '\'') {
+			if (text_char(g, p) == '"' || text_char(g, p) == '\'') {
 				in_quote = 1;
-				quote = *p;
-			} else if (*p == '>') {
+				quote = (char)text_char(g, p);
+			} else if (text_char(g, p) == '>') {
 				break;
 			}
 		}
 		p++;
 	}
 
-	if (p >= g->end || *p != '>')
+	if (p >= text_len(g) || text_char(g, p) != '>')
 		return 0;
 
 	*gt = p;
 	*is_self_closing = 0;
 	if (!*is_closing) {
-		char *q = p;
-		while (q > lt + 1 && is_ascii_space((unsigned char)q[-1]))
+		int q = p;
+		while (q > lt + 1 && is_ascii_space((unsigned char)text_char(g, q - 1)))
 			q--;
-		if (q > lt + 1 && q[-1] == '/')
+		if (q > lt + 1 && text_char(g, q - 1) == '/')
 			*is_self_closing = 1;
 	}
 
@@ -344,9 +348,9 @@ parse_tag_at(struct editor *g, char *lt, char **gt,
 }
 
 static int
-find_matching_closing_tag(struct editor *g, char *from,
-                          const char *name, size_t name_len,
-                          char **close_lt, char **close_gt)
+find_matching_closing_tag(struct editor *g, int from,
+                          int name, size_t name_len,
+                          int *close_lt, int *close_gt)
 {
 	/*
 	 * == Find the matching closing tag for an already-found opening tag ==
@@ -357,13 +361,13 @@ find_matching_closing_tag(struct editor *g, char *from,
 	 * *close_lt and *close_gt to the '<' and '>' of the closing tag.
 	 * Returns 1 on success, 0 if no match is found.
 	 */
-	char *p;
+	int p;
 	int depth = 1;
 
-	for (p = from; p < g->end; p++) {
-		if (*p == '<') {
-			char *gt;
-			char *tag_name;
+	for (p = from; p < text_len(g); p++) {
+		if (text_char(g, p) == '<') {
+			int gt;
+			int tag_name;
 			size_t tag_name_len;
 			int is_closing;
 			int is_self_closing;
@@ -372,7 +376,7 @@ find_matching_closing_tag(struct editor *g, char *from,
 			                  &is_self_closing))
 				continue;
 
-			if (tag_name_equal(name, name_len, tag_name, tag_name_len)) {
+			if (tag_name_equal(g, name, name_len, tag_name, tag_name_len)) {
 				if (is_closing) {
 					depth--;
 					if (depth == 0) {
@@ -393,8 +397,8 @@ find_matching_closing_tag(struct editor *g, char *from,
 }
 
 static int
-find_tag_text_object_range(struct editor *g, int inner, char **start,
-                           char **stop)
+find_tag_text_object_range(struct editor *g, int inner, int *start,
+                           int *stop)
 {
 	/*
 	 * == Find the enclosing HTML/XML tag pair for the 't' text object ==
@@ -404,22 +408,22 @@ find_tag_text_object_range(struct editor *g, int inner, char **start,
 	 * inner=1 gives the content between the tags; inner=0 includes both
 	 * the open and close tags.  Returns 0 on success, -1 on failure.
 	 */
-	char *anchor = g->dot;
-	char *cursor = g->dot;
-	char *open_lt = NULL;
-	char *open_gt = NULL;
-	char *close_lt = NULL;
-	char *close_gt = NULL;
+	int anchor = g->dot;
+	int cursor = g->dot;
+	int open_lt = -1;
+	int open_gt = -1;
+	int close_lt = -1;
+	int close_gt = -1;
 	int repeat = (g->cmdcnt ?: 1);
 
 	while (repeat-- > 0) {
-		char *p;
+		int p;
 		int found = 0;
 
 		for (p = cursor;; p = cp_prev(g, p)) {
-			if (*p == '<') {
-				char *gt;
-				char *name;
+			if (text_char(g, p) == '<') {
+				int gt;
+				int name;
 				size_t name_len;
 				int is_closing;
 				int is_self_closing;
@@ -437,7 +441,7 @@ find_tag_text_object_range(struct editor *g, int inner, char **start,
 				}
 			}
 
-			if (p == g->text)
+			if (p == 0)
 				break;
 		}
 
@@ -445,15 +449,15 @@ find_tag_text_object_range(struct editor *g, int inner, char **start,
 			return -1;
 
 		if (repeat > 0) {
-			if (open_lt == g->text)
+			if (open_lt == 0)
 				return -1;
 			cursor = cp_prev(g, open_lt);
 		}
 	}
 
 	if (inner) {
-		char *inner_start = open_gt + 1;
-		char *inner_stop = close_lt - 1;
+		int inner_start = open_gt + 1;
+		int inner_stop = close_lt - 1;
 
 		if (inner_start > inner_stop)
 			return -1;
@@ -508,7 +512,7 @@ word_obj_member(unsigned char ch, int cls, int bigword)
 
 static int
 find_word_text_object_range(struct editor *g, int inner, int bigword,
-                            char **start, char **stop)
+                            int *start, int *stop)
 {
 	/*
 	 * == Find the word or WORD text object range enclosing dot ==
@@ -520,18 +524,18 @@ find_word_text_object_range(struct editor *g, int inner, int bigword,
 	 * bigword=1 treats any non-whitespace run as one token (W/B/E-style).
 	 * Returns 0 on success, -1 if dot is on whitespace or the edge.
 	 */
-	char *scan = g->dot;
-	char *left = NULL;
-	char *right = NULL;
+	int scan = g->dot;
+	int left = -1;
+	int right = -1;
 	int repeat = (g->cmdcnt ?: 1);
 
 	while (repeat-- > 0) {
-		char *line_start;
-		char *line_end;
+		int line_start;
+		int line_end;
 		int cls;
 
-		if (scan >= g->end || *scan == '\n') {
-			if (scan == g->text)
+		if (scan >= text_len(g) || text_char(g, scan) == '\n') {
+			if (scan == 0)
 				return -1;
 			scan = cp_prev(g, scan);
 		}
@@ -539,55 +543,55 @@ find_word_text_object_range(struct editor *g, int inner, int bigword,
 		line_start = begin_line(g, scan);
 		line_end = end_line(g, scan);
 
-		if (is_ascii_space((unsigned char)*scan)) {
-			char *tmp = scan;
-			while (tmp < line_end && is_ascii_space((unsigned char)*tmp))
+		if (is_ascii_space((unsigned char)text_char(g, scan))) {
+			int tmp = scan;
+			while (tmp < line_end && is_ascii_space((unsigned char)text_char(g, tmp)))
 				tmp = cp_next(g, tmp);
 			if (tmp < line_end) {
 				scan = tmp;
 			} else {
 				tmp = scan;
 				while (tmp > line_start) {
-					char *prev = cp_prev(g, tmp);
-					if (!is_ascii_space((unsigned char)*prev)) {
+					int prev = cp_prev(g, tmp);
+					if (!is_ascii_space((unsigned char)text_char(g, prev))) {
 						tmp = prev;
 						break;
 					}
 					tmp = prev;
 				}
-				if (is_ascii_space((unsigned char)*tmp) || *tmp == '\n')
+				if (is_ascii_space((unsigned char)text_char(g, tmp)) || text_char(g, tmp) == '\n')
 					return -1;
 				scan = tmp;
 			}
 		}
 
-		cls = word_obj_classify((unsigned char)*scan, bigword);
+		cls = word_obj_classify((unsigned char)text_char(g, scan), bigword);
 		if (cls == WOBJ_NONE)
 			return -1;
 
 		left = scan;
 		while (left > line_start) {
-			char *prev = cp_prev(g, left);
-			if (!word_obj_member((unsigned char)*prev, cls, bigword))
+			int prev = cp_prev(g, left);
+			if (!word_obj_member((unsigned char)text_char(g, prev), cls, bigword))
 				break;
 			left = prev;
 		}
 
 		right = scan;
 		while (right < line_end) {
-			char *next = cp_next(g, right);
+			int next = cp_next(g, right);
 			if (next >= line_end)
 				break;
-			if (!word_obj_member((unsigned char)*next, cls, bigword))
+			if (!word_obj_member((unsigned char)text_char(g, next), cls, bigword))
 				break;
 			right = next;
 		}
 
 		if (!inner) {
-			char *next = cp_next(g, right);
+			int next = cp_next(g, right);
 			int had_trailing = 0;
 
-			while (next < line_end && is_ascii_space((unsigned char)*next)) {
+			while (next < line_end && is_ascii_space((unsigned char)text_char(g, next))) {
 				right = next;
 				had_trailing = 1;
 				next = cp_next(g, next);
@@ -595,8 +599,8 @@ find_word_text_object_range(struct editor *g, int inner, int bigword,
 
 			if (!had_trailing) {
 				while (left > line_start) {
-					char *prev = cp_prev(g, left);
-					if (!is_ascii_space((unsigned char)*prev))
+					int prev = cp_prev(g, left);
+					if (!is_ascii_space((unsigned char)text_char(g, prev)))
 						break;
 					left = prev;
 				}
@@ -604,8 +608,8 @@ find_word_text_object_range(struct editor *g, int inner, int bigword,
 		}
 
 		if (repeat > 0) {
-			char *next = cp_next(g, right);
-			if (next >= g->end || *next == '\n')
+			int next = cp_next(g, right);
+			if (next >= text_len(g) || text_char(g, next) == '\n')
 				return -1;
 			scan = next;
 		}
@@ -617,13 +621,13 @@ find_word_text_object_range(struct editor *g, int inner, int bigword,
 }
 
 int
-textobj_find_range(struct editor *g, int ai_cmd, int obj, char **start,
-                   char **stop, int *buftype)
+textobj_find_range(struct editor *g, int ai_cmd, int obj, int *start,
+                   int *stop, int *buftype)
 {
 	/*
 	 * == Resolve a text-object range for use by operators ==
 	 *
-	 * Dispatches on obj to find the appropriate start/stop buffer pointers
+	 * Dispatches on obj to find the appropriate start/stop buffer offsets
 	 * and sets *buftype (PARTIAL, MULTI, or WHOLE) to tell the operator
 	 * whether the selection spans partial lines, multiple lines, or whole
 	 * lines.
@@ -638,8 +642,9 @@ textobj_find_range(struct editor *g, int ai_cmd, int obj, char **start,
 	 *
 	 * Returns 0 on success, -1 (and calls indicate_error) on failure.
 	 */
-	char *p;
-	char *q;
+	int p;
+	int q;
+	int nl;
 	char open;
 
 	p = q = g->dot;
@@ -647,8 +652,8 @@ textobj_find_range(struct editor *g, int ai_cmd, int obj, char **start,
 	if (normalize_text_object_delimiter(obj, &open)) {
 		if (find_delimited_text_object_range(g, open, ai_cmd == 'i', &p, &q) == 0) {
 			q = cp_end(g, q) - 1;
-			*buftype = memchr(p, '\n', (size_t)(q - p + 1)) ? MULTI
-			                                                : PARTIAL;
+			nl = text_find(g, p, '\n');
+			*buftype = (nl >= 0 && nl <= q) ? MULTI : PARTIAL;
 			*start = p;
 			*stop = q;
 			return 0;
@@ -673,8 +678,8 @@ textobj_find_range(struct editor *g, int ai_cmd, int obj, char **start,
 	} else if (obj == 't') {
 		if (find_tag_text_object_range(g, ai_cmd == 'i', &p, &q) == 0) {
 			q = cp_end(g, q) - 1;
-			*buftype = memchr(p, '\n', (size_t)(q - p + 1)) ? MULTI
-			                                                : PARTIAL;
+			nl = text_find(g, p, '\n');
+			*buftype = (nl >= 0 && nl <= q) ? MULTI : PARTIAL;
 			*start = p;
 			*stop = q;
 			return 0;

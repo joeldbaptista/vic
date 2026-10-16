@@ -24,6 +24,7 @@
 #include "session.h"
 #include "status.h"
 #include "term.h"
+#include "text.h"
 #include "undo.h"
 
 #include <limits.h>
@@ -65,11 +66,12 @@ get_one_address(struct editor *g, char *p, int *result,
 	int addr;
 	int got_addr;
 	char *q;
+	int tp;
 	char c;
 	int dir;
 
 	got_addr = FALSE;
-	addr = count_lines(g, g->text, g->dot);
+	addr = count_lines(g, 0, g->dot);
 	sign = 0;
 	for (;;) {
 		if (isblank((unsigned char)*p)) {
@@ -83,30 +85,30 @@ get_one_address(struct editor *g, char *p, int *result,
 			got_addr = TRUE;
 		} else if (!got_addr && *p == '$') {
 			p++;
-			addr = count_lines(g, g->text, g->end - 1);
+			addr = count_lines(g, 0, text_len(g) - 1);
 			got_addr = TRUE;
 		} else if (!got_addr && *p == '\'') {
 			p++;
-			q = NULL;
+			tp = -1;
 			if (*p == '<') {
 				p++;
-				q = g->mark[MARK_LT];
+				tp = g->mark[MARK_LT];
 			} else if (*p == '>') {
 				p++;
-				q = g->mark[MARK_GT];
+				tp = g->mark[MARK_GT];
 			} else {
 				c = (char)tolower((unsigned char)*p);
 				p++;
 				if (c >= 'a' && c <= 'z') {
 					c = (char)(c - 'a');
-					q = g->mark[(unsigned char)c];
+					tp = g->mark[(unsigned char)c];
 				}
 			}
-			if (q == NULL) {
+			if (tp < 0) {
 				status_line_bold(g, "Mark not set");
 				return NULL;
 			}
-			addr = count_lines(g, g->text, q);
+			addr = count_lines(g, 0, tp);
 			got_addr = TRUE;
 		} else if (!got_addr && (*p == '/' || *p == '?')) {
 			c = *p;
@@ -119,22 +121,22 @@ get_one_address(struct editor *g, char *p, int *result,
 			if (*p == c)
 				p++;
 			if (c == '/') {
-				q = next_line(g, g->dot);
+				tp = next_line(g, g->dot);
 				dir = (FORWARD << 1) | FULL;
 			} else {
-				q = begin_line(g, g->dot);
+				tp = begin_line(g, g->dot);
 				dir = ((unsigned)BACK << 1) | FULL;
 			}
-			q = char_search(g, q, g->last_search_pattern + 1, dir);
-			if (q == NULL) {
-				q = char_search(g, dir > 0 ? g->text : g->end - 1,
-				                g->last_search_pattern + 1, dir);
-				if (q == NULL) {
+			tp = char_search(g, tp, g->last_search_pattern + 1, dir);
+			if (tp < 0) {
+				tp = char_search(g, dir > 0 ? 0 : text_len(g) - 1,
+				                 g->last_search_pattern + 1, dir);
+				if (tp < 0) {
 					status_line_bold(g, "Pattern not found");
 					return NULL;
 				}
 			}
-			addr = count_lines(g, g->text, q);
+			addr = count_lines(g, 0, tp);
 			got_addr = TRUE;
 		} else if (isdigit((unsigned char)*p)) {
 			num = 0;
@@ -184,7 +186,7 @@ get_address(struct editor *g, char *p, int *b, int *e,
 	int state = GET_ADDRESS;
 	int valid;
 	int addr;
-	char *save_dot = g->dot;
+	int save_dot = g->dot;
 
 	for (;;) {
 		if (isblank((unsigned char)*p)) {
@@ -192,7 +194,7 @@ get_address(struct editor *g, char *p, int *b, int *e,
 		} else if (state == GET_ADDRESS && *p == '%') {
 			p++;
 			*b = 1;
-			*e = count_lines(g, g->text, g->end - 1);
+			*e = count_lines(g, 0, text_len(g) - 1);
 			*got = 3;
 			state = GET_SEPARATOR;
 		} else if (state == GET_ADDRESS) {
@@ -240,8 +242,8 @@ strchr_backslash(const char *s, int c)
 	return NULL;
 }
 
-static char *
-regex_search(struct editor *g, char *q, regex_t *preg,
+static int
+regex_search(struct editor *g, int q, regex_t *preg,
              const char *Rorig, size_t *len_F, size_t *len_R,
              char **R, int eflags)
 {
@@ -257,24 +259,26 @@ regex_search(struct editor *g, char *q, regex_t *preg,
 	 *   \0 … \9  — captured group 0–9
 	 *
 	 * Two-pass: first pass computes *len_R with *R=NULL; second pass fills
-	 * the allocated buffer.  Returns a pointer to the match start, or NULL.
+	 * the allocated buffer.  The match runs on a copy of the text from q to
+	 * end of line.  Returns the offset of the match start, or -1.
 	 */
 	regmatch_t regmatch[MAX_SUBPATTERN];
 	regmatch_t *cur_match;
-	char *found = NULL;
+	int found = -1;
 	const char *t;
 	char *r;
+	char *qs;
 
 	{
-		char *eol = end_line(g, q);
-		char sv = *eol;
+		int eol = end_line(g, q);
 		int rc;
 
-		*eol = '\0';
-		rc = regexec(preg, q, MAX_SUBPATTERN, regmatch, eflags);
-		*eol = sv;
-		if (rc != 0)
+		qs = text_copy(g, q, eol - q);
+		rc = regexec(preg, qs, MAX_SUBPATTERN, regmatch, eflags);
+		if (rc != 0) {
+			free(qs);
 			return found;
+		}
 	}
 
 	found = q + regmatch[0].rm_so;
@@ -292,7 +296,7 @@ fill_result:
 				cur_match = regmatch + (*t - '0');
 				if (cur_match->rm_so >= 0) {
 					len = (size_t)(cur_match->rm_eo - cur_match->rm_so);
-					from = q + cur_match->rm_so;
+					from = qs + cur_match->rm_so;
 				}
 			}
 		}
@@ -306,6 +310,7 @@ fill_result:
 		*R = xzalloc(*len_R + 1);
 		goto fill_result;
 	}
+	free(qs);
 
 	return found;
 }
@@ -340,7 +345,7 @@ global(struct editor *g, char *p, int invert, int b, int e,
 	int *offsets;
 	int cap, nmatches;
 	int gi, gj;
-	char *line;
+	int line;
 
 	if (!*p) {
 		status_line_bold(g, ":g requires /pattern/cmd");
@@ -361,7 +366,7 @@ global(struct editor *g, char *p, int invert, int b, int e,
 
 	/* Resolve range.  Default: whole file. */
 	gstart = 1;
-	gend = count_lines(g, g->text, g->end - 1);
+	gend = count_lines(g, 0, text_len(g) - 1);
 	if (got & 1) {                /* GOT_ADDRESS */
 		if ((got & 3) == 3) { /* GOT_RANGE */
 			gstart = b;
@@ -392,16 +397,16 @@ global(struct editor *g, char *p, int invert, int b, int e,
 	offsets = xmalloc((size_t)cap * sizeof(int));
 
 	line = find_line(g, gstart);
-	for (gi = gstart; gi <= gend && line < g->end; gi++) {
-		char *eol, sv;
+	for (gi = gstart; gi <= gend && line < text_len(g); gi++) {
+		int eol;
+		char *ltext;
 		regmatch_t m;
 		int matched;
 
 		eol = end_line(g, line);
-		sv = *eol;
-		*eol = '\0';
-		matched = (regexec(&preg, line, 1, &m, 0) == 0);
-		*eol = sv;
+		ltext = text_copy(g, line, eol - line);
+		matched = (regexec(&preg, ltext, 1, &m, 0) == 0);
+		free(ltext);
 
 		if (matched != invert) {
 			if (nmatches == cap) {
@@ -409,7 +414,7 @@ global(struct editor *g, char *p, int invert, int b, int e,
 				                    (size_t)nmatches + 1, 64);
 				offsets = xrealloc(offsets, (size_t)cap * sizeof(int));
 			}
-			offsets[nmatches++] = (int)(line - g->text);
+			offsets[nmatches++] = line;
 		}
 		line = next_line(g, line);
 	}
@@ -419,11 +424,11 @@ global(struct editor *g, char *p, int invert, int b, int e,
 	for (gi = 0; gi < nmatches; gi++) {
 		int old_size, size_delta;
 
-		if (offsets[gi] < 0 || offsets[gi] >= (int)(g->end - g->text))
+		if (offsets[gi] < 0 || offsets[gi] >= text_len(g))
 			continue; /* line was swallowed by a previous deletion */
 
-		g->dot = g->text + offsets[gi];
-		old_size = (int)(g->end - g->text);
+		g->dot = offsets[gi];
+		old_size = text_len(g);
 
 		if (gcmd[0]) {
 			char *gcopy = xstrdup(gcmd);
@@ -432,7 +437,7 @@ global(struct editor *g, char *p, int invert, int b, int e,
 		}
 
 		/* Adjust remaining offsets for any buffer size change. */
-		size_delta = (int)(g->end - g->text) - old_size;
+		size_delta = text_len(g) - old_size;
 		if (size_delta != 0) {
 			for (gj = gi + 1; gj < nmatches; gj++)
 				if (offsets[gj] > offsets[gi])
@@ -459,7 +464,7 @@ struct colon_state {
 	char *buf;    /* full command token (buf after get_address), mutable */
 	char *cmd;    /* alpha-only command name (points into cs_cmd) */
 	char *args;   /* arguments after command name + force flag */
-	char *q, *r;  /* range start/end pointers into text */
+	int q, r;     /* range start/end offsets into text */
 	int b, e;     /* address line numbers (-1 if not given) */
 	unsigned got; /* address bitmask */
 	int useforce; /* trailing ! flag */
@@ -492,7 +497,7 @@ colon_do_linenum(struct editor *g, int e, unsigned got)
 	 * was given.
 	 */
 	if (!(got & 1))
-		e = count_lines(g, g->text, g->dot);
+		e = count_lines(g, 0, g->dot);
 	status_line(g, "%d", e);
 }
 
@@ -502,7 +507,7 @@ colon_do_delete(struct editor *g, const struct colon_state *cs)
 	/*
 	 * == :delete [range] — yank and delete the addressed lines ==
 	 */
-	char *q = cs->q, *r = cs->r;
+	int q = cs->q, r = cs->r;
 
 	if (!(cs->got & 1)) {
 		q = begin_line(g, g->dot);
@@ -551,8 +556,8 @@ colon_do_edit(struct editor *g, const struct colon_state *cs)
 	status_line(g, "'%s'%s%s %uL, %uC", fn,
 	            (size < 0 ? " [New file]" : ""),
 	            (g->readonly_mode ? " [Readonly]" : ""),
-	            count_lines(g, g->text, g->end - 1),
-	            (int)(g->end - g->text));
+	            count_lines(g, 0, text_len(g) - 1),
+	            text_len(g));
 }
 
 static void
@@ -622,7 +627,7 @@ colon_do_list(struct editor *g, const struct colon_state *cs)
 	 * The line ends with a visible '$' to indicate the newline.
 	 */
 #define MAXPRINT (sizeof(ESC_BOLD_TEXT "^?" ESC_NORM_TEXT) + 1)
-	char *q = cs->q, *r = cs->r;
+	int q = cs->q, r = cs->r;
 	char *dst;
 
 	if (!(cs->got & 1)) {
@@ -635,7 +640,7 @@ colon_do_list(struct editor *g, const struct colon_state *cs)
 		char c;
 		int c_is_no_print;
 
-		c = *q++;
+		c = (char)text_char(g, q++);
 		if (c == '\n') {
 			*dst++ = '$';
 			break;
@@ -740,9 +745,8 @@ colon_do_read_cmd(struct editor *g, int e, unsigned got, const char *cmd)
 	pid_t pid;
 	char *buf;
 	size_t len;
-	char *ins_pt;
+	int ins_pt;
 	int num;
-	uintptr_t ofs;
 
 	if (pipe(pipefd) < 0) {
 		status_line_bold(g, "pipe: %s", strerror(errno));
@@ -783,24 +787,21 @@ colon_do_read_cmd(struct editor *g, int e, unsigned got, const char *cmd)
 	buf[len] = '\0';
 
 	if (e == 0) {
-		ins_pt = g->text;
+		ins_pt = 0;
 	} else {
 		ins_pt = next_line(g, (got & 1) ? find_line(g, e) : g->dot);
-		if (ins_pt == g->end - 1)
+		if (ins_pt == text_len(g) - 1)
 			++ins_pt;
 	}
-	num = count_lines(g, g->text, ins_pt);
-	if (ins_pt == g->end)
+	num = count_lines(g, 0, ins_pt);
+	if (ins_pt == text_len(g))
 		num++;
-	ofs = (uintptr_t)(ins_pt - g->text);
-	text_hole_make(g, ins_pt, (int)len);
-	ins_pt = g->text + ofs;
-	memcpy(ins_pt, buf, len);
+	text_insert_bytes(g, ins_pt, buf, (int)len);
 	undo_push_insert(g, ins_pt, (int)len, ALLOW_UNDO);
 	g->modified_count++;
 	g->dot = find_line(g, num);
 	status_line(g, "%d lines read",
-	            count_lines(g, ins_pt, ins_pt + len - 1));
+	            count_lines(g, ins_pt, ins_pt + (int)len - 1));
 	free(buf);
 }
 
@@ -817,7 +818,7 @@ colon_do_read(struct editor *g, const struct colon_state *cs)
 	int size;
 	int num;
 	char *fn = g->current_filename;
-	char *q;
+	int q;
 
 	if (cs->args[0] == '!' || cs->useforce) {
 		const char *shell_cmd = cs->args[0] == '!'
@@ -837,20 +838,16 @@ colon_do_read(struct editor *g, const struct colon_state *cs)
 		return;
 	}
 	if (cs->e == 0) {
-		q = g->text;
+		q = 0;
 	} else {
 		q = next_line(g, (cs->got & 1) ? find_line(g, cs->e) : g->dot);
-		if (q == g->end - 1)
+		if (q == text_len(g) - 1)
 			++q;
 	}
-	num = count_lines(g, g->text, q);
-	if (q == g->end)
+	num = count_lines(g, 0, q);
+	if (q == text_len(g))
 		num++;
-	{
-		uintptr_t ofs = (uintptr_t)(q - g->text);
-		size = file_insert(g, fn, q, 0);
-		q = g->text + ofs;
-	}
+	size = file_insert(g, fn, q, 0);
 	if (size < 0)
 		return;
 	status_line(g, "'%s'%s %uL, %uC", fn,
@@ -944,7 +941,7 @@ colon_do_substitute(struct editor *g, const struct colon_state *cs)
 	 * An empty pattern reuses the last search pattern.
 	 */
 	char *buf = cs->args; /* already past 's' and whitespace */
-	char *q = cs->q;
+	int q = cs->q;
 	int b = cs->b, e = cs->e;
 	unsigned got = cs->got;
 	char c;
@@ -992,7 +989,7 @@ colon_do_substitute(struct editor *g, const struct colon_state *cs)
 
 	if (!(got & 1)) {
 		q = begin_line(g, g->dot);
-		b = e = count_lines(g, g->text, q);
+		b = e = count_lines(g, 0, q);
 	} else if (!((got & 3) == 3)) {
 		b = e;
 	}
@@ -1006,16 +1003,16 @@ colon_do_substitute(struct editor *g, const struct colon_state *cs)
 		return;
 	}
 	for (i = b; i <= e; i++) {
-		char *ls = q;
-		char *found;
+		int ls = q;
+		int found;
 		int eflags = 0;
 	vc4:
 		found = regex_search(g, q, &preg, Rorig, &len_F, &len_R, &R,
 		                     eflags);
-		if (found) {
-			uintptr_t bias;
+		if (found >= 0) {
+			int bias;
 			if (len_F)
-				text_hole_delete(g, found, found + len_F - 1,
+				text_hole_delete(g, found, found + (int)len_F - 1,
 				                 undo++ ? ALLOW_UNDO_CHAIN : ALLOW_UNDO);
 			if (len_R != 0) {
 				bias = string_insert(g, found, R,
@@ -1034,7 +1031,7 @@ colon_do_substitute(struct editor *g, const struct colon_state *cs)
 				}
 			}
 			if (gflag == 'g') {
-				char *next = found + len_R;
+				int next = found + (int)len_R;
 				/* Zero-width match: step past it so the retry
 				 * can't re-match the same empty position. */
 				if (len_F == 0 && next < end_line(g, ls))
@@ -1075,15 +1072,12 @@ colon_do_metadata(struct editor *g, const struct colon_state *cs)
 	/*
 	 * == :metadata — print buffer/allocation diagnostics on the status line ==
 	 *
-	 * Shows the number of times the text buffer has been reallocated, the
-	 * unused capacity remaining in the current allocation, and the name of
-	 * the file being edited.
+	 * Shows the number of pieces in the piece tree, the size of its add
+	 * buffer, and the name of the file being edited.
 	 */
-	int free_space = g->text_size - (int)(g->end - g->text);
-
 	(void)cs;
-	status_line(g, "reallocs=%d free=%d bytes file=%s", g->realloc_count,
-	            free_space,
+	status_line(g, "pieces=%zu add=%zu file=%s", ptpieces(g->pt),
+	            g->pt->alen,
 	            g->current_filename ? g->current_filename : "No file");
 }
 
@@ -1100,7 +1094,7 @@ colon_do_write(struct editor *g, const struct colon_state *cs)
 	 *   :wn      — also advances to the next file
 	 *   :x       — write only if modified, then exit
 	 */
-	char *q = cs->q, *r = cs->r;
+	int q = cs->q, r = cs->r;
 	int should_write;
 	int size;
 	int l;
@@ -1141,7 +1135,7 @@ colon_do_write(struct editor *g, const struct colon_state *cs)
 		status_line(g, "'%s' %uL, %uC", fn, nlines, l);
 	}
 	if (!should_write || l == size) {
-		if (should_write && q == g->text && q + l == g->end) {
+		if (should_write && q == 0 && q + l == text_len(g)) {
 			g->modified_count = 0;
 			g->last_modified_count = -1;
 		}
@@ -1172,7 +1166,7 @@ colon_do_yank(struct editor *g, const struct colon_state *cs)
 	 * Defaults to the current line if no address is given.  Shows the
 	 * line/char count on the status line.
 	 */
-	char *q = cs->q, *r = cs->r;
+	int q = cs->q, r = cs->r;
 	int lines;
 
 	if (!(cs->got & 1)) {
@@ -1242,14 +1236,14 @@ colon_do_run(struct editor *g, const struct colon_state *cs)
 	 */
 	char *argv[RUN_MAX_ARGS];
 	int argc;
-	char *range_start, *range_end;
+	int range_start, range_end;
 
 	if (cs->got & 1) {
 		range_start = cs->q;
 		range_end = cs->r;
 	} else {
-		range_start = g->text;
-		range_end = g->end - 1;
+		range_start = 0;
+		range_end = text_len(g) - 1;
 	}
 
 	argc = run_tokenize(cs->args, argv, RUN_MAX_ARGS);
@@ -1310,7 +1304,7 @@ colon_do_shell(struct editor *g, const char *cmd)
  * :{range}!cmd.
  */
 void
-colon_do_filter(struct editor *g, char *q, char *r, const char *cmd)
+colon_do_filter(struct editor *g, int q, int r, const char *cmd)
 {
 	/*
 	 * == :{range}!cmd — filter the addressed lines through cmd ==
@@ -1336,7 +1330,9 @@ colon_do_filter(struct editor *g, char *q, char *r, const char *cmd)
 	pid_t pid;
 	int status = 0;
 	char *buf;
+	char *range_text;
 	size_t len = 0;
+	ssize_t wrc;
 
 	if (!cmd || !*cmd) {
 		status_line(g, "!: no command given");
@@ -1349,7 +1345,10 @@ colon_do_filter(struct editor *g, char *q, char *r, const char *cmd)
 		return;
 	}
 	unlink(tmpname);
-	if (full_write(tmpfd, q, (size_t)(r - q + 1)) < 0) {
+	range_text = text_copy(g, q, r - q + 1);
+	wrc = full_write(tmpfd, range_text, (size_t)(r - q + 1));
+	free(range_text);
+	if (wrc < 0) {
 		status_line_bold(g, "write: %s", strerror(errno));
 		close(tmpfd);
 		return;
@@ -1447,24 +1446,23 @@ colon_do_filter(struct editor *g, char *q, char *r, const char *cmd)
 
 	if (len > 0 && buf[len - 1] != '\n')
 		buf[len++] = '\n';
-	/* The insert can move the text store; buffer_replace_range returns the
-	 * realloc bias so q stays valid (g->dot is adjusted by text_hole_make,
-	 * but a raw local is not). */
+	/* buffer_replace_range returns a bias that is always 0 now that q is
+	 * an offset; the call site keeps the old adjust-by-bias form. */
 	q += buffer_replace_range(g, q, r, buf, (int)len);
 	g->dot = q;
 	status_line(g, "%d lines filtered",
-	            len > 0 ? count_lines(g, q, q + len - 1) : 0);
+	            len > 0 ? count_lines(g, q, q + (int)len - 1) : 0);
 	free(buf);
 }
 
 void
-filter_prompt_and_run(struct editor *g, char *q, char *r, const char *prompt)
+filter_prompt_and_run(struct editor *g, int q, int r, const char *prompt)
 {
 	/*
 	 * == Prompt for a shell command and filter [q, r] through it ==
 	 *
 	 * Shared by the ! operator (operator.c) and visual-mode ! (visual.c).
-	 * The range is handed over as pointers rather than re-derived from an
+	 * The range is handed over as offsets rather than re-derived from an
 	 * address string, so the '< '> marks are left untouched and colon()'s
 	 * address parser is not re-entered.  prompt is cosmetic only; the
 	 * caller has already resolved the range.
@@ -1569,8 +1567,8 @@ colon(struct editor *g, char *buf)
 		goto done;
 	cs.buf = buf;
 
-	cs.q = g->text;
-	cs.r = g->end - 1;
+	cs.q = 0;
+	cs.r = text_len(g) - 1;
 	if (cs.got & 1) { /* GOT_ADDRESS */
 		int lines;
 		/* total_line_count caches against modified_count; this block

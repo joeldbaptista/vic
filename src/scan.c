@@ -1,7 +1,7 @@
 /*
  * scan.c - low-level token/whitespace scanner.
  *
- * Provides skip_thing(), which moves a pointer forward or backward by
+ * Provides skip_thing(), which moves an offset forward or backward by
  * linecnt lines according to a scan type:
  *
  *   S_BEFORE_WS  — stop before whitespace
@@ -18,6 +18,7 @@
 #include "scan.h"
 
 #include "codepoint.h"
+#include "text.h"
 
 enum {
 	S_BEFORE_WS = 1,
@@ -46,7 +47,7 @@ is_ascii_punct(unsigned char c)
 }
 
 static int
-st_test(struct editor *g, char *p, int type, int dir, char *tested)
+st_test(struct editor *g, int p, int type, int dir, char *tested)
 {
 	/*
 	 * == Test whether a scan should continue from p ==
@@ -67,16 +68,16 @@ st_test(struct editor *g, char *p, int type, int dir, char *tested)
 	unsigned char ci;
 	int test;
 	int inc;
-	char *pi;
+	int pi;
 
 	inc = dir;
-	c0 = (unsigned char)*p;
+	c0 = (unsigned char)text_char(g, p);
 	if (inc >= 0) {
 		pi = cp_next(g, p);
-		ci = (pi < g->end) ? (unsigned char)*pi : '\n';
+		ci = (pi < text_len(g)) ? (unsigned char)text_char(g, pi) : '\n';
 	} else {
-		pi = (p > g->text) ? cp_prev(g, p) : g->text;
-		ci = (pi >= g->text) ? (unsigned char)*pi : '\n';
+		pi = (p > 0) ? cp_prev(g, p) : 0;
+		ci = (pi >= 0) ? (unsigned char)text_char(g, pi) : '\n';
 	}
 	c = (char)c0;
 	test = 0;
@@ -105,8 +106,8 @@ st_test(struct editor *g, char *p, int type, int dir, char *tested)
 	return test;
 }
 
-char *
-skip_thing(struct editor *g, char *p, int linecnt, int dir, int type)
+int
+skip_thing(struct editor *g, int p, int linecnt, int dir, int type)
 {
 	/*
 	 * == Step p forward/backward by scan type ==
@@ -124,9 +125,9 @@ skip_thing(struct editor *g, char *p, int linecnt, int dir, int type)
 	while (st_test(g, p, type, dir, &c)) {
 		if (c == '\n' && --linecnt < 1)
 			break;
-		if (dir >= 0 && p >= g->end - 1)
+		if (dir >= 0 && p >= text_len(g) - 1)
 			break;
-		if (dir < 0 && p <= g->text)
+		if (dir < 0 && p <= 0)
 			break;
 		p = (dir >= 0) ? cp_next(g, p) : cp_prev(g, p);
 	}

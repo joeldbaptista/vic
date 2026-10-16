@@ -15,6 +15,7 @@
 
 #include "codepoint.h"
 #include "scan.h"
+#include "text.h"
 
 enum {
 	FORWARD = 1,
@@ -59,14 +60,14 @@ run_word_forward_cmd(struct editor *g)
 	 *   order differs from b and e.
 	 */
 	do {
-		if (is_word_byte((unsigned char)*g->dot)) {
+		if (is_word_byte((unsigned char)text_char(g, g->dot))) {
 			g->dot = skip_thing(g, g->dot, 1, FORWARD, S_END_ALNUM);
-		} else if (is_ascii_punct((unsigned char)*g->dot)) {
+		} else if (is_ascii_punct((unsigned char)text_char(g, g->dot))) {
 			g->dot = skip_thing(g, g->dot, 1, FORWARD, S_END_PUNCT);
 		}
-		if (g->dot < g->end - 1)
+		if (g->dot < text_len(g) - 1)
 			g->dot = cp_next(g, g->dot);
-		if (is_ascii_space((unsigned char)*g->dot)) {
+		if (is_ascii_space((unsigned char)text_char(g, g->dot))) {
 			g->dot = skip_thing(g, g->dot, 2, FORWARD, S_OVER_WS);
 		}
 	} while (--g->cmdcnt > 0);
@@ -88,17 +89,17 @@ run_word_dir_cmd(struct editor *g, int dir, int end_mode)
 	 *   non-space char after retreating.
 	 */
 	do {
-		char *adj =
+		int adj =
 		    (dir == FORWARD) ? cp_next(g, g->dot) : cp_prev(g, g->dot);
-		if (adj < g->text || adj > g->end - 1)
+		if (adj < 0 || adj > text_len(g) - 1)
 			break;
 		g->dot = adj;
-		if (is_ascii_space((unsigned char)*g->dot)) {
+		if (is_ascii_space((unsigned char)text_char(g, g->dot))) {
 			g->dot = skip_thing(g, g->dot, end_mode ? 2 : 1, dir, S_OVER_WS);
 		}
-		if (is_word_byte((unsigned char)*g->dot)) {
+		if (is_word_byte((unsigned char)text_char(g, g->dot))) {
 			g->dot = skip_thing(g, g->dot, 1, dir, S_END_ALNUM);
-		} else if (is_ascii_punct((unsigned char)*g->dot)) {
+		} else if (is_ascii_punct((unsigned char)text_char(g, g->dot))) {
 			g->dot = skip_thing(g, g->dot, 1, dir, S_END_PUNCT);
 		}
 	} while (--g->cmdcnt > 0);
@@ -139,10 +140,10 @@ run_blank_word_cmd(struct editor *g, int c)
 	if (c == 'B')
 		dir = BACK;
 	do {
-		char *adj =
+		int adj =
 		    (dir == FORWARD) ? cp_next(g, g->dot) : cp_prev(g, g->dot);
 		unsigned char adjc =
-		    (adj >= g->text && adj < g->end) ? (unsigned char)*adj : '\n';
+		    (adj >= 0 && adj < text_len(g)) ? (unsigned char)text_char(g, adj) : '\n';
 		if (c == 'W' || is_ascii_space(adjc)) {
 			g->dot = skip_thing(g, g->dot, 1, dir, S_TO_WS);
 			g->dot = skip_thing(g, g->dot, 2, dir, S_OVER_WS);

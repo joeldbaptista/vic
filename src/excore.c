@@ -57,7 +57,7 @@ setops(struct editor *g, char *args, int flg_no)
 		if (t <= 0 || t > 32)
 			goto bad;
 		g->tabstop = t;
-		g->refresh_last_screenbegin = NULL;
+		g->refresh_last_screenbegin = -1;
 		return;
 	}
 	if (index & VI_CURSORSHAPE) {
@@ -95,7 +95,7 @@ setops(struct editor *g, char *args, int flg_no)
 			g->setops &= ~index;
 		else
 			g->setops ^= index;
-		g->refresh_last_screenbegin = NULL;
+		g->refresh_last_screenbegin = -1;
 		return;
 	}
 	if (flg_no)
@@ -104,7 +104,7 @@ setops(struct editor *g, char *args, int flg_no)
 		g->setops |= index;
 
 	if (index & (VI_NUMBER | VI_RELATIVENUMBER))
-		g->refresh_last_screenbegin = NULL;
+		g->refresh_last_screenbegin = -1;
 }
 
 char *

@@ -4,6 +4,10 @@
  * run_dispatch() tokenises the argument string and calls the matching
  * run_fn from run_table[].  Add new commands by appending entries there.
  *
+ * Every command receives its range as text offsets [rs, re] (inclusive).
+ * Commands that read the range copy it out of the text with text_copy and
+ * work on the copy; positions written back stay offsets.
+ *
  * Built-in commands
  * -----------------
  *   echo [args…]             — print args to the status bar
@@ -33,6 +37,7 @@
 #include "buffer.h"
 #include "screen.h"
 #include "status.h"
+#include "text.h"
 #include "undo.h"
 #include <ctype.h>
 #include <stdint.h>
@@ -63,43 +68,57 @@ is_ident(unsigned char c)
 
 static void
 run_upper(struct editor *g, int argc, char *argv[],
-          char *rs, char *re)
+          int rs, int re)
 {
 	/*
 	 * == :run upper — uppercase all ASCII letters in the range ==
 	 */
 	int len = (int)(re - rs + 1);
-	char *p;
+	char *buf;
+	int p;
 
 	(void)argc;
 	(void)argv;
 	undo_push(g, rs, (unsigned)len, UNDO_SWAP);
-	for (p = rs; p <= re; p++)
-		*p = (char)toupper((unsigned char)*p);
+	/* Change the bytes in one copy and write them back in one call: a
+	 * text_set_char() per byte costs a tree descent and a piece split
+	 * each, which is minutes of work over a whole large file. */
+	buf = text_copy(g, rs, len);
+	for (p = 0; p < len; p++)
+		buf[p] = (char)toupper((unsigned char)buf[p]);
+	text_set_bytes(g, rs, buf, len);
+	free(buf);
 }
 
 static void
 run_lower(struct editor *g, int argc, char *argv[],
-          char *rs, char *re)
+          int rs, int re)
 {
 	/*
 	 * == :run lower — lowercase all ASCII letters in the range ==
 	 */
 	int len = (int)(re - rs + 1);
-	char *p;
+	char *buf;
+	int p;
 
 	(void)argc;
 	(void)argv;
 	undo_push(g, rs, (unsigned)len, UNDO_SWAP);
-	for (p = rs; p <= re; p++)
-		*p = (char)tolower((unsigned char)*p);
+	/* Change the bytes in one copy and write them back in one call: a
+	 * text_set_char() per byte costs a tree descent and a piece split
+	 * each, which is minutes of work over a whole large file. */
+	buf = text_copy(g, rs, len);
+	for (p = 0; p < len; p++)
+		buf[p] = (char)tolower((unsigned char)buf[p]);
+	text_set_bytes(g, rs, buf, len);
+	free(buf);
 }
 
 /* ---- trim -------------------------------------------------------------- */
 
 static void
 run_trim(struct editor *g, int argc, char *argv[],
-         char *rs, char *re)
+         int rs, int re)
 {
 	/*
 	 * == :run trim — strip trailing whitespace from each line in the range ==
@@ -107,6 +126,7 @@ run_trim(struct editor *g, int argc, char *argv[],
 	int range_len = (int)(re - rs + 1);
 	char *new_buf = malloc((size_t)range_len + 1);
 	char *p, *out;
+	char *rb, *rbe;
 	int new_len;
 
 	(void)argc;
@@ -114,13 +134,15 @@ run_trim(struct editor *g, int argc, char *argv[],
 	if (!new_buf)
 		return;
 
+	rb = text_copy(g, rs, range_len);
+	rbe = rb + (re - rs);
 	out = new_buf;
-	p = rs;
-	while (p <= re) {
+	p = rb;
+	while (p <= rbe) {
 		char *line_start = out;
 		char *last_non_ws = out - 1;
 
-		while (p <= re && *p != '\n') {
+		while (p <= rbe && *p != '\n') {
 			*out = *p++;
 			if (*out != ' ' && *out != '\t')
 				last_non_ws = out;
@@ -128,12 +150,13 @@ run_trim(struct editor *g, int argc, char *argv[],
 		}
 		/* truncate trailing whitespace */
 		out = last_non_ws + 1;
-		if (p <= re) {
+		if (p <= rbe) {
 			*out++ = '\n';
 			p++;
 		}
 		(void)line_start;
 	}
+	free(rb);
 	new_len = (int)(out - new_buf);
 	buffer_replace_range(g, rs, re, new_buf, new_len);
 	free(new_buf);
@@ -143,7 +166,7 @@ run_trim(struct editor *g, int argc, char *argv[],
 
 static void
 run_trimsel(struct editor *g, int argc, char *argv[],
-            char *rs, char *re)
+            int rs, int re)
 {
 	/*
 	 * == :run trimsel [0|1|2] — strip whitespace from the visual selection ==
@@ -158,49 +181,60 @@ run_trimsel(struct editor *g, int argc, char *argv[],
 	 *   2           — strip trailing whitespace only
 	 */
 	int mode = 0;
-	char *start, *end;
+	int start, end;
 
 	if (argc >= 2)
 		mode = (int)strtol(argv[1], NULL, 10);
 
 	/* Use exact visual marks when available. */
-	start = g->mark[MARK_LT] ? g->mark[MARK_LT] : rs;
-	end   = g->mark[MARK_GT] ? g->mark[MARK_GT] : re;
+	start = g->mark[MARK_LT] >= 0 ? g->mark[MARK_LT] : rs;
+	end   = g->mark[MARK_GT] >= 0 ? g->mark[MARK_GT] : re;
 	if (start > end) {
-		char *tmp = start;
+		int tmp = start;
 		start = end;
 		end   = tmp;
 	}
 
 	if (mode == 0 || mode == 1) {
-		while (start <= end && (*start == ' ' || *start == '\t' ||
-		                        *start == '\n' || *start == '\r'))
+		while (start <= end && (text_char(g, start) == ' ' ||
+		                        text_char(g, start) == '\t' ||
+		                        text_char(g, start) == '\n' ||
+		                        text_char(g, start) == '\r'))
 			start++;
 	}
 	if (mode == 0 || mode == 2) {
-		while (end >= start && (*end == ' ' || *end == '\t' ||
-		                        *end == '\n' || *end == '\r'))
+		while (end >= start && (text_char(g, end) == ' ' ||
+		                        text_char(g, end) == '\t' ||
+		                        text_char(g, end) == '\n' ||
+		                        text_char(g, end) == '\r'))
 			end--;
 	}
 
 	if (start > end) {
-		buffer_replace_range(g, g->mark[MARK_LT], g->mark[MARK_GT],
+		/*
+		 * The selection is all blanks: delete it.  Fall back to the
+		 * range like the code above does; passing an unset mark here
+		 * made undo_push() copy from NULL in the pointer version.
+		 */
+		buffer_replace_range(g,
+		                     g->mark[MARK_LT] >= 0 ? g->mark[MARK_LT] : rs,
+		                     g->mark[MARK_GT] >= 0 ? g->mark[MARK_GT] : re,
 		                     "", 0);
 		return;
 	}
 
 	{
-		char *sel_start = g->mark[MARK_LT] ? g->mark[MARK_LT] : rs;
-		char *sel_end   = g->mark[MARK_GT] ? g->mark[MARK_GT] : re;
+		int sel_start = g->mark[MARK_LT] >= 0 ? g->mark[MARK_LT] : rs;
+		int sel_end   = g->mark[MARK_GT] >= 0 ? g->mark[MARK_GT] : re;
 		if (sel_start > sel_end) {
-			char *tmp = sel_start; sel_start = sel_end; sel_end = tmp;
+			int tmp = sel_start; sel_start = sel_end; sel_end = tmp;
 		}
 		if (start > sel_start || end < sel_end) {
 			int new_len = (int)(end - start + 1);
 			char *tmp = malloc((size_t)new_len);
 			if (!tmp)
 				return;
-			memcpy(tmp, start, (size_t)new_len);
+			text_read(g, start, new_len, tmp);
 			buffer_replace_range(g, sel_start, sel_end, tmp,
 			                     new_len);
 			free(tmp);
@@ -212,7 +246,7 @@ run_trimsel(struct editor *g, int argc, char *argv[],
 
 static void
 run_uniq(struct editor *g, int argc, char *argv[],
-         char *rs, char *re)
+         int rs, int re)
 {
 	/*
 	 * == :run uniq — remove consecutive duplicate lines in the range ==
@@ -220,6 +254,7 @@ run_uniq(struct editor *g, int argc, char *argv[],
 	int range_len = (int)(re - rs + 1);
 	char *new_buf = malloc((size_t)range_len + 1);
 	char *p, *out;
+	char *rb, *rbe;
 	char *prev_line = NULL;
 	int prev_len = 0;
 	int new_len;
@@ -229,13 +264,15 @@ run_uniq(struct editor *g, int argc, char *argv[],
 	if (!new_buf)
 		return;
 
+	rb = text_copy(g, rs, range_len);
+	rbe = rb + (re - rs);
 	out = new_buf;
-	p = rs;
-	while (p <= re) {
+	p = rb;
+	while (p <= rbe) {
 		char *line = p;
 		int len = 0;
 
-		while (p <= re && *p != '\n') {
+		while (p <= rbe && *p != '\n') {
 			p++;
 			len++;
 		}
@@ -243,14 +280,15 @@ run_uniq(struct editor *g, int argc, char *argv[],
 		    memcmp(line, prev_line, (size_t)len) != 0) {
 			memcpy(out, line, (size_t)len);
 			out += len;
-			if (p <= re)
+			if (p <= rbe)
 				*out++ = '\n';
 			prev_line = line;
 			prev_len = len;
 		}
-		if (p <= re)
+		if (p <= rbe)
 			p++;
 	}
+	free(rb);
 	new_len = (int)(out - new_buf);
 	buffer_replace_range(g, rs, re, new_buf, new_len);
 	free(new_buf);
@@ -286,7 +324,7 @@ line_cmp_desc(const void *a, const void *b)
 
 static void
 run_sort(struct editor *g, int argc, char *argv[],
-         char *rs, char *re)
+         int rs, int re)
 {
 	/*
 	 * == :run sort [-r] — sort lines in the range lexicographically ==
@@ -300,6 +338,7 @@ run_sort(struct editor *g, int argc, char *argv[],
 	struct line_ref *lines = malloc((size_t)max_lines * sizeof(*lines));
 	char *new_buf = malloc((size_t)range_len + 1);
 	char *p, *out;
+	char *rb, *rbe;
 	int n = 0, i, new_len;
 
 	if (!lines || !new_buf) {
@@ -308,16 +347,18 @@ run_sort(struct editor *g, int argc, char *argv[],
 		return;
 	}
 
-	p = rs;
-	while (p <= re && n < max_lines) {
+	rb = text_copy(g, rs, range_len);
+	rbe = rb + (re - rs);
+	p = rb;
+	while (p <= rbe && n < max_lines) {
 		lines[n].start = p;
 		lines[n].len = 0;
-		while (p <= re && *p != '\n') {
+		while (p <= rbe && *p != '\n') {
 			p++;
 			lines[n].len++;
 		}
 		n++;
-		if (p <= re)
+		if (p <= rbe)
 			p++;
 	}
 
@@ -332,9 +373,10 @@ run_sort(struct editor *g, int argc, char *argv[],
 			*out++ = '\n';
 	}
 	/* preserve trailing newline if original range ended with one */
-	if (re >= rs && *re == '\n')
+	if (re >= rs && text_char(g, re) == '\n')
 		*out++ = '\n';
 
+	free(rb);
 	new_len = (int)(out - new_buf);
 	buffer_replace_range(g, rs, re, new_buf, new_len);
 	free(lines);
@@ -345,7 +387,7 @@ run_sort(struct editor *g, int argc, char *argv[],
 
 static void
 run_wrap(struct editor *g, int argc, char *argv[],
-         char *rs, char *re)
+         int rs, int re)
 {
 	/*
 	 * == :run wrap N — hard-wrap each line in the range at column N ==
@@ -357,6 +399,7 @@ run_wrap(struct editor *g, int argc, char *argv[],
 	int range_len = (int)(re - rs + 1);
 	char *new_buf;
 	char *p, *out;
+	char *rb, *rbe;
 	int new_len;
 
 	if (argc < 2 || (col = atoi(argv[1])) < 4) {
@@ -369,17 +412,19 @@ run_wrap(struct editor *g, int argc, char *argv[],
 	if (!new_buf)
 		return;
 
+	rb = text_copy(g, rs, range_len);
+	rbe = rb + (re - rs);
 	out = new_buf;
-	p = rs;
-	while (p <= re) {
+	p = rb;
+	while (p <= rbe) {
 		char *line = p;
 		int len = 0;
 
-		while (p <= re && *p != '\n') {
+		while (p <= rbe && *p != '\n') {
 			p++;
 			len++;
 		}
-		if (p <= re)
+		if (p <= rbe)
 			p++; /* skip newline */
 
 		/* wrap this line */
@@ -403,10 +448,11 @@ run_wrap(struct editor *g, int argc, char *argv[],
 		out += len;
 		*out++ = '\n';
 	}
+	free(rb);
 	new_len = (int)(out - new_buf);
 	/* strip extra trailing newline if original didn't end with one */
 	if (new_len > 0 && new_buf[new_len - 1] == '\n' &&
-	    (re < rs || *re != '\n'))
+	    (re < rs || text_char(g, re) != '\n'))
 		new_len--;
 	buffer_replace_range(g, rs, re, new_buf, new_len);
 	free(new_buf);
@@ -416,7 +462,7 @@ run_wrap(struct editor *g, int argc, char *argv[],
 
 static void
 run_number(struct editor *g, int argc, char *argv[],
-           char *rs, char *re)
+           int rs, int re)
 {
 	/*
 	 * == :run number — prepend sequential line numbers to each line ==
@@ -427,36 +473,42 @@ run_number(struct editor *g, int argc, char *argv[],
 	int range_len = (int)(re - rs + 1);
 	int nlines = 1;
 	char *scan, *new_buf, *p, *out;
+	char *rb, *rbe;
 	int lineno = 1, new_len, max_plen;
 
 	(void)argc;
 	(void)argv;
 
-	for (scan = rs; scan <= re; scan++)
+	rb = text_copy(g, rs, range_len);
+	rbe = rb + (re - rs);
+	for (scan = rb; scan <= rbe; scan++)
 		if (*scan == '\n')
 			nlines++;
-	if (*re == '\n')
+	if (text_char(g, re) == '\n')
 		nlines--;
 	/* exact worst-case prefix width for the largest line number used */
 	max_plen = snprintf(NULL, 0, "%d. ", nlines);
 	new_buf = malloc((size_t)range_len + (size_t)nlines * (size_t)max_plen);
-	if (!new_buf)
+	if (!new_buf) {
+		free(rb);
 		return;
+	}
 
 	out = new_buf;
-	p = rs;
-	while (p <= re) {
+	p = rb;
+	while (p <= rbe) {
 		char prefix[16];
 		int plen = snprintf(prefix, sizeof(prefix), "%d. ", lineno++);
 		memcpy(out, prefix, (size_t)plen);
 		out += plen;
-		while (p <= re && *p != '\n')
+		while (p <= rbe && *p != '\n')
 			*out++ = *p++;
-		if (p <= re) {
+		if (p <= rbe) {
 			*out++ = '\n';
 			p++;
 		}
 	}
+	free(rb);
 	new_len = (int)(out - new_buf);
 	buffer_replace_range(g, rs, re, new_buf, new_len);
 	free(new_buf);
@@ -466,7 +518,7 @@ run_number(struct editor *g, int argc, char *argv[],
 
 static void
 run_deindent(struct editor *g, int argc, char *argv[],
-             char *rs, char *re)
+             int rs, int re)
 {
 	/*
 	 * == :run deindent [N] — remove N indent levels from each line ==
@@ -479,6 +531,7 @@ run_deindent(struct editor *g, int argc, char *argv[],
 	int range_len = (int)(re - rs + 1);
 	char *new_buf = malloc((size_t)range_len + 1);
 	char *p, *out;
+	char *rb, *rbe;
 	int new_len;
 
 	if (levels < 1)
@@ -486,19 +539,21 @@ run_deindent(struct editor *g, int argc, char *argv[],
 	if (!new_buf)
 		return;
 
+	rb = text_copy(g, rs, range_len);
+	rbe = rb + (re - rs);
 	out = new_buf;
-	p = rs;
-	while (p <= re) {
+	p = rb;
+	while (p <= rbe) {
 		int removed = 0;
 
 		/* remove up to (levels * tabstop) leading spaces or levels tabs */
-		while (p <= re && *p != '\n' && removed < levels) {
+		while (p <= rbe && *p != '\n' && removed < levels) {
 			if (*p == '\t') {
 				p++;
 				removed++;
 			} else if (*p == ' ') {
 				int sp = 0;
-				while (p <= re && *p == ' ' && sp < tabstop) {
+				while (p <= rbe && *p == ' ' && sp < tabstop) {
 					p++;
 					sp++;
 				}
@@ -507,13 +562,14 @@ run_deindent(struct editor *g, int argc, char *argv[],
 				break;
 			}
 		}
-		while (p <= re && *p != '\n')
+		while (p <= rbe && *p != '\n')
 			*out++ = *p++;
-		if (p <= re) {
+		if (p <= rbe) {
 			*out++ = '\n';
 			p++;
 		}
 	}
+	free(rb);
 	new_len = (int)(out - new_buf);
 	buffer_replace_range(g, rs, re, new_buf, new_len);
 	free(new_buf);
@@ -523,7 +579,7 @@ run_deindent(struct editor *g, int argc, char *argv[],
 
 static void
 run_align(struct editor *g, int argc, char *argv[],
-          char *rs, char *re)
+          int rs, int re)
 {
 	/*
 	 * == :run align CHAR — align each line so CHAR appears in the same column ==
@@ -535,6 +591,7 @@ run_align(struct editor *g, int argc, char *argv[],
 	int range_len = (int)(re - rs + 1);
 	char *new_buf;
 	char *p, *out;
+	char *rb, *rbe;
 	int max_col, new_len;
 
 	if (argc < 2 || argv[1][0] == '\0') {
@@ -544,13 +601,15 @@ run_align(struct editor *g, int argc, char *argv[],
 	target = argv[1][0];
 
 	/* first pass: find the maximum column of target on any line */
+	rb = text_copy(g, rs, range_len);
+	rbe = rb + (re - rs);
 	max_col = -1;
-	p = rs;
-	while (p <= re) {
+	p = rb;
+	while (p <= rbe) {
 		int col = 0;
 		int found = 0;
 
-		while (p <= re && *p != '\n') {
+		while (p <= rbe && *p != '\n') {
 			if (*p == target && !found) {
 				found = 1;
 				if (col > max_col)
@@ -559,34 +618,37 @@ run_align(struct editor *g, int argc, char *argv[],
 			col++;
 			p++;
 		}
-		if (p <= re)
+		if (p <= rbe)
 			p++;
 	}
 	if (max_col < 0) {
 		status_line(g, "align: character '%c' not found in range", target);
+		free(rb);
 		return;
 	}
 
 	/* second pass: rebuild lines, padding to max_col before target */
 	new_buf = malloc((size_t)range_len + (size_t)max_col * range_len + 1);
-	if (!new_buf)
+	if (!new_buf) {
+		free(rb);
 		return;
+	}
 
 	out = new_buf;
-	p = rs;
-	while (p <= re) {
+	p = rb;
+	while (p <= rbe) {
 		char *line = p;
 		int len = 0;
 		int target_col = -1, col = 0;
 
-		while (p <= re && *p != '\n') {
+		while (p <= rbe && *p != '\n') {
 			if (*p == target && target_col < 0)
 				target_col = col;
 			col++;
 			p++;
 			len++;
 		}
-		if (p <= re)
+		if (p <= rbe)
 			p++;
 
 		if (target_col >= 0) {
@@ -604,8 +666,9 @@ run_align(struct editor *g, int argc, char *argv[],
 		*out++ = '\n';
 	}
 	/* strip trailing newline if range didn't end with one */
-	if (out > new_buf && *(out - 1) == '\n' && *re != '\n')
+	if (out > new_buf && *(out - 1) == '\n' && text_char(g, re) != '\n')
 		out--;
+	free(rb);
 	new_len = (int)(out - new_buf);
 	buffer_replace_range(g, rs, re, new_buf, new_len);
 	free(new_buf);
@@ -626,7 +689,7 @@ url_safe(unsigned char c)
 
 static void
 run_urlencode(struct editor *g, int argc, char *argv[],
-              char *rs, char *re)
+              int rs, int re)
 {
 	/*
 	 * == :run urlencode — percent-encode the range as a URL component ==
@@ -634,6 +697,7 @@ run_urlencode(struct editor *g, int argc, char *argv[],
 	int range_len = (int)(re - rs + 1);
 	char *new_buf = malloc((size_t)range_len * 3 + 1);
 	char *p, *out;
+	char *rb, *rbe;
 	int new_len;
 	static const char hex[] = "0123456789ABCDEF";
 
@@ -641,8 +705,10 @@ run_urlencode(struct editor *g, int argc, char *argv[],
 	(void)argv;
 	if (!new_buf)
 		return;
+	rb = text_copy(g, rs, range_len);
+	rbe = rb + (re - rs);
 	out = new_buf;
-	for (p = rs; p <= re; p++) {
+	for (p = rb; p <= rbe; p++) {
 		unsigned char c = (unsigned char)*p;
 		if (url_safe(c)) {
 			*out++ = (char)c;
@@ -652,6 +718,7 @@ run_urlencode(struct editor *g, int argc, char *argv[],
 			*out++ = hex[c & 0xf];
 		}
 	}
+	free(rb);
 	new_len = (int)(out - new_buf);
 	buffer_replace_range(g, rs, re, new_buf, new_len);
 	free(new_buf);
@@ -674,7 +741,7 @@ hex_val(unsigned char c)
 
 static void
 run_urldecode(struct editor *g, int argc, char *argv[],
-              char *rs, char *re)
+              int rs, int re)
 {
 	/*
 	 * == :run urldecode — decode percent-encoded sequences in the range ==
@@ -682,16 +749,19 @@ run_urldecode(struct editor *g, int argc, char *argv[],
 	int range_len = (int)(re - rs + 1);
 	char *new_buf = malloc((size_t)range_len + 1);
 	char *p, *out;
+	char *rb, *rbe;
 	int new_len;
 
 	(void)argc;
 	(void)argv;
 	if (!new_buf)
 		return;
+	rb = text_copy(g, rs, range_len);
+	rbe = rb + (re - rs);
 	out = new_buf;
-	p = rs;
-	while (p <= re) {
-		if (*p == '%' && p + 2 <= re) {
+	p = rb;
+	while (p <= rbe) {
+		if (*p == '%' && p + 2 <= rbe) {
 			int hi = hex_val((unsigned char)p[1]);
 			int lo = hex_val((unsigned char)p[2]);
 			if (hi >= 0 && lo >= 0) {
@@ -706,6 +776,7 @@ run_urldecode(struct editor *g, int argc, char *argv[],
 			*out++ = *p;
 		p++;
 	}
+	free(rb);
 	new_len = (int)(out - new_buf);
 	buffer_replace_range(g, rs, re, new_buf, new_len);
 	free(new_buf);
@@ -718,7 +789,7 @@ static const char b64_table[] =
 
 static void
 run_base64enc(struct editor *g, int argc, char *argv[],
-              char *rs, char *re)
+              int rs, int re)
 {
 	/*
 	 * == :run base64enc — encode the range as Base64 (with line wrapping) ==
@@ -726,8 +797,9 @@ run_base64enc(struct editor *g, int argc, char *argv[],
 	int range_len = (int)(re - rs + 1);
 	/* base64 output: 4 bytes per 3 input, plus newlines every 76 chars */
 	char *new_buf = malloc((size_t)range_len * 2 + 8);
-	unsigned char *p = (unsigned char *)rs;
-	unsigned char *end = (unsigned char *)re + 1;
+	char *rb;
+	unsigned char *p;
+	unsigned char *end;
 	char *out;
 	int new_len, col = 0;
 
@@ -735,12 +807,15 @@ run_base64enc(struct editor *g, int argc, char *argv[],
 	(void)argv;
 	if (!new_buf)
 		return;
+	rb = text_copy(g, rs, range_len);
+	p = (unsigned char *)rb;
+	end = (unsigned char *)rb + (re - rs) + 1;
 	out = new_buf;
 	while (p < end) {
 		unsigned int b0 = *p++;
 		unsigned int b1 = (p < end) ? *p++ : 0;
 		unsigned int b2 = (p < end) ? *p++ : 0;
-		int take = (int)(p - (unsigned char *)rs) <= range_len ? 3 : (p - 1 < end) ? 2
+		int take = (int)(p - (unsigned char *)rb) <= range_len ? 3 : (p - 1 < end) ? 2
 		                                                                           : 1;
 		unsigned int v = (b0 << 16) | (b1 << 8) | b2;
 
@@ -756,6 +831,7 @@ run_base64enc(struct editor *g, int argc, char *argv[],
 	}
 	if (col > 0)
 		*out++ = '\n';
+	free(rb);
 	new_len = (int)(out - new_buf);
 	buffer_replace_range(g, rs, re, new_buf, new_len);
 	free(new_buf);
@@ -782,7 +858,7 @@ b64_val(unsigned char c)
 
 static void
 run_base64dec(struct editor *g, int argc, char *argv[],
-              char *rs, char *re)
+              int rs, int re)
 {
 	/*
 	 * == :run base64dec — decode Base64 text in the range back to binary ==
@@ -790,19 +866,22 @@ run_base64dec(struct editor *g, int argc, char *argv[],
 	int range_len = (int)(re - rs + 1);
 	char *new_buf = malloc((size_t)range_len + 1);
 	char *p, *out;
+	char *rb, *rbe;
 	int new_len;
 
 	(void)argc;
 	(void)argv;
 	if (!new_buf)
 		return;
+	rb = text_copy(g, rs, range_len);
+	rbe = rb + (re - rs);
 	out = new_buf;
-	p = rs;
-	while (p <= re) {
+	p = rb;
+	while (p <= rbe) {
 		int v[4], i, n = 0;
 		unsigned int bits;
 
-		for (i = 0; i < 4 && p <= re;) {
+		for (i = 0; i < 4 && p <= rbe;) {
 			unsigned char c = (unsigned char)*p++;
 			if (c == '\n' || c == '\r' || c == ' ')
 				continue;
@@ -819,6 +898,7 @@ run_base64dec(struct editor *g, int argc, char *argv[],
 		if (n >= 4)
 			*out++ = (char)(bits & 0xff);
 	}
+	free(rb);
 	new_len = (int)(out - new_buf);
 	buffer_replace_range(g, rs, re, new_buf, new_len);
 	free(new_buf);
@@ -828,7 +908,7 @@ run_base64dec(struct editor *g, int argc, char *argv[],
 
 static void
 run_jsonesc(struct editor *g, int argc, char *argv[],
-            char *rs, char *re)
+            int rs, int re)
 {
 	/*
 	 * == :run jsonesc — escape special characters for JSON string embedding ==
@@ -842,14 +922,17 @@ run_jsonesc(struct editor *g, int argc, char *argv[],
 	int range_len = (int)(re - rs + 1);
 	char *new_buf = malloc((size_t)range_len * 6 + 1);
 	char *p, *out;
+	char *rb, *rbe;
 	int new_len;
 
 	(void)argc;
 	(void)argv;
 	if (!new_buf)
 		return;
+	rb = text_copy(g, rs, range_len);
+	rbe = rb + (re - rs);
 	out = new_buf;
-	for (p = rs; p <= re; p++) {
+	for (p = rb; p <= rbe; p++) {
 		unsigned char c = (unsigned char)*p;
 		switch (c) {
 		case '"':
@@ -888,6 +971,7 @@ run_jsonesc(struct editor *g, int argc, char *argv[],
 			}
 		}
 	}
+	free(rb);
 	new_len = (int)(out - new_buf);
 	buffer_replace_range(g, rs, re, new_buf, new_len);
 	free(new_buf);
@@ -895,7 +979,7 @@ run_jsonesc(struct editor *g, int argc, char *argv[],
 
 static void
 run_jsonunesc(struct editor *g, int argc, char *argv[],
-              char *rs, char *re)
+              int rs, int re)
 {
 	/*
 	 * == :run jsonunesc — decode JSON escape sequences back to raw bytes ==
@@ -909,16 +993,19 @@ run_jsonunesc(struct editor *g, int argc, char *argv[],
 	int range_len = (int)(re - rs + 1);
 	char *new_buf = malloc((size_t)range_len + 1);
 	char *p, *out;
+	char *rb, *rbe;
 	int new_len;
 
 	(void)argc;
 	(void)argv;
 	if (!new_buf)
 		return;
+	rb = text_copy(g, rs, range_len);
+	rbe = rb + (re - rs);
 	out = new_buf;
-	p = rs;
-	while (p <= re) {
-		if (*p == '\\' && p + 1 <= re) {
+	p = rb;
+	while (p <= rbe) {
+		if (*p == '\\' && p + 1 <= rbe) {
 			p++;
 			switch (*p) {
 			case '"':
@@ -954,7 +1041,7 @@ run_jsonunesc(struct editor *g, int argc, char *argv[],
 				p++;
 				break;
 			case 'u':
-				if (p + 4 <= re) {
+				if (p + 4 <= rbe) {
 					unsigned int cp = 0;
 					int i;
 					p++;
@@ -987,6 +1074,7 @@ run_jsonunesc(struct editor *g, int argc, char *argv[],
 			*out++ = *p++;
 		}
 	}
+	free(rb);
 	new_len = (int)(out - new_buf);
 	buffer_replace_range(g, rs, re, new_buf, new_len);
 	free(new_buf);
@@ -1004,7 +1092,7 @@ struct word_freq {
 
 static void
 run_freq(struct editor *g, int argc, char *argv[],
-         char *rs, char *re)
+         int rs, int re)
 {
 	/*
 	 * == :run freq — count word frequencies and display the top 5 ==
@@ -1017,7 +1105,9 @@ run_freq(struct editor *g, int argc, char *argv[],
 	 */
 	struct word_freq wf[FREQ_MAX_WORDS];
 	int n = 0;
-	char *p = rs;
+	char *rb = text_copy(g, rs, re - rs + 1);
+	char *rbe = rb + (re - rs);
+	char *p = rb;
 	char status[STATUS_BUFFER_LEN];
 	int i, j, top, out_len;
 
@@ -1025,12 +1115,12 @@ run_freq(struct editor *g, int argc, char *argv[],
 	(void)argv;
 	memset(wf, 0, sizeof(wf));
 
-	while (p <= re) {
+	while (p <= rbe) {
 		if (is_ident_start((unsigned char)*p)) {
 			char *start = p;
 			int len = 0;
 
-			while (p <= re && is_ident((unsigned char)*p)) {
+			while (p <= rbe && is_ident((unsigned char)*p)) {
 				p++;
 				len++;
 			}
@@ -1055,6 +1145,8 @@ run_freq(struct editor *g, int argc, char *argv[],
 			p++;
 		}
 	}
+
+	free(rb);
 
 	/* partial bubble sort: extract top 5 */
 	top = n < 5 ? n : 5;
@@ -1081,7 +1173,7 @@ run_freq(struct editor *g, int argc, char *argv[],
 
 static void
 run_col(struct editor *g, int argc, char *argv[],
-        char *rs, char *re)
+        int rs, int re)
 {
 	/*
 	 * == :run col — report the maximum column width across all lines in range ==
@@ -1091,22 +1183,25 @@ run_col(struct editor *g, int argc, char *argv[],
 	 * column limit before wrapping or aligning.
 	 */
 	int max_col = 0;
-	char *p = rs;
+	char *rb = text_copy(g, rs, re - rs + 1);
+	char *rbe = rb + (re - rs);
+	char *p = rb;
 
 	(void)argc;
 	(void)argv;
-	while (p <= re) {
+	while (p <= rbe) {
 		int col = 0;
 
-		while (p <= re && *p != '\n') {
+		while (p <= rbe && *p != '\n') {
 			col++;
 			p++;
 		}
 		if (col > max_col)
 			max_col = col;
-		if (p <= re)
+		if (p <= rbe)
 			p++;
 	}
+	free(rb);
 	status_line(g, "max column width: %d", max_col);
 }
 
@@ -1137,7 +1232,7 @@ fnv1a(const char *s, int len)
 
 static void
 run_hash(struct editor *g, int argc, char *argv[],
-         char *rs, char *re)
+         int rs, int re)
 {
 	/*
 	 * == :run hash — FNV-1a hash analysis and replacement for the range ==
@@ -1156,7 +1251,8 @@ run_hash(struct editor *g, int argc, char *argv[],
 		int max_slots = 65536;
 		char *seen;
 		int collisions = 0, total = 0;
-		char *p = rs;
+		char *rb, *rbe;
+		char *p;
 		char status[STATUS_BUFFER_LEN];
 
 		if (N < 1 || N > (uint64_t)max_slots) {
@@ -1167,12 +1263,15 @@ run_hash(struct editor *g, int argc, char *argv[],
 		if (!seen)
 			return;
 
-		while (p <= re) {
+		rb = text_copy(g, rs, re - rs + 1);
+		rbe = rb + (re - rs);
+		p = rb;
+		while (p <= rbe) {
 			if (is_ident_start((unsigned char)*p)) {
 				char *start = p;
 				int len = 0;
 
-				while (p <= re && is_ident((unsigned char)*p)) {
+				while (p <= rbe && is_ident((unsigned char)*p)) {
 					p++;
 					len++;
 				}
@@ -1187,6 +1286,7 @@ run_hash(struct editor *g, int argc, char *argv[],
 			}
 		}
 		free(seen);
+		free(rb);
 		snprintf(status, sizeof(status),
 		         "hash mod %llu: %d identifiers, %d collision%s",
 		         (unsigned long long)N, total,
@@ -1196,24 +1296,26 @@ run_hash(struct editor *g, int argc, char *argv[],
 		/* hash replace [mod N] — replace each identifier with its hash value */
 	} else if (argc >= 2 && strcmp(argv[1], "replace") == 0) {
 		uint64_t N = 0; /* 0 = no modulo, use raw hash */
-		char *p = rs;
-		char *re_cur = re;
+		int p = rs;
+		int re_cur = re;
 		int undo = 0;
 
 		if (argc >= 4 && strcmp(argv[2], "mod") == 0)
 			N = (uint64_t)atoi(argv[3]);
 
 		while (p <= re_cur) {
-			if (is_ident_start((unsigned char)*p)) {
-				char *id = p;
+			if (is_ident_start((unsigned char)text_char(g, p))) {
+				int id = p;
 				int id_len = 0;
 
 				while (p <= re_cur &&
-				       is_ident((unsigned char)*p)) {
+				       is_ident((unsigned char)text_char(g, p))) {
 					p++;
 					id_len++;
 				}
-				uint64_t h = fnv1a(id, id_len);
+				char *id_s = text_copy(g, id, id_len);
+				uint64_t h = fnv1a(id_s, id_len);
+				free(id_s);
 				if (N > 0)
 					h %= N;
 
@@ -1221,7 +1323,7 @@ run_hash(struct editor *g, int argc, char *argv[],
 				int num_len = snprintf(num, sizeof(num),
 				                       "%llu",
 				                       (unsigned long long)h);
-				uintptr_t bias;
+				int bias;
 
 				text_hole_delete(g, id, id + id_len - 1,
 				                 undo++ ? ALLOW_UNDO_CHAIN
@@ -1241,7 +1343,9 @@ run_hash(struct editor *g, int argc, char *argv[],
 		/* hash — FNV-1a of entire range, displayed on status bar */
 	} else {
 		int len = (int)(re - rs + 1);
-		uint64_t h = fnv1a(rs, len);
+		char *rb = text_copy(g, rs, len);
+		uint64_t h = fnv1a(rb, len);
+		free(rb);
 		status_line(g, "hash: %llu  (0x%016llx)  len=%d",
 		            (unsigned long long)h, (unsigned long long)h, len);
 	}
@@ -1329,7 +1433,7 @@ s2uc(const char *src, int len, char *dst)
 
 static void
 run_convert(struct editor *g, int argc, char *argv[],
-            char *rs, char *re)
+            int rs, int re)
 {
 	/*
 	 * == :run convert — rename identifiers across a range ==
@@ -1343,8 +1447,8 @@ run_convert(struct editor *g, int argc, char *argv[],
 	 * chained into a single undo entry.  Reports the count on the status bar.
 	 */
 	int (*transform)(const char *, int, char *);
-	char *p = rs;
-	char *re_cur = re;
+	int p = rs;
+	int re_cur = re;
 	int subs = 0, undo = 0;
 
 	if (argc < 2) {
@@ -1364,11 +1468,11 @@ run_convert(struct editor *g, int argc, char *argv[],
 	}
 
 	while (p <= re_cur) {
-		if (is_ident_start((unsigned char)*p)) {
-			char *id = p;
+		if (is_ident_start((unsigned char)text_char(g, p))) {
+			int id = p;
 			int id_len = 0;
 
-			while (p <= re_cur && is_ident((unsigned char)*p)) {
+			while (p <= re_cur && is_ident((unsigned char)text_char(g, p))) {
 				p++;
 				id_len++;
 			}
@@ -1376,12 +1480,13 @@ run_convert(struct editor *g, int argc, char *argv[],
 			if (!dst)
 				continue;
 
-			int new_len = transform(id, id_len, dst);
+			char *id_s = text_copy(g, id, id_len);
+			int new_len = transform(id_s, id_len, dst);
 			dst[new_len] = '\0';
 
 			if (new_len != id_len ||
-			    memcmp(id, dst, (size_t)id_len) != 0) {
-				uintptr_t bias;
+			    memcmp(id_s, dst, (size_t)id_len) != 0) {
+				int bias;
 
 				text_hole_delete(g, id, id + id_len - 1,
 				                 undo++ ? ALLOW_UNDO_CHAIN
@@ -1395,6 +1500,7 @@ run_convert(struct editor *g, int argc, char *argv[],
 				re_cur += bias + new_len;
 				subs++;
 			}
+			free(id_s);
 			free(dst);
 		} else {
 			p++;
@@ -1412,7 +1518,7 @@ run_convert(struct editor *g, int argc, char *argv[],
 
 static void
 run_echo(struct editor *g, int argc, char *argv[],
-         char *rs, char *re)
+         int rs, int re)
 {
 	/*
 	 * == :run echo — display arguments on the status bar ==
@@ -1445,7 +1551,7 @@ run_echo(struct editor *g, int argc, char *argv[],
 
 static void
 run_wc(struct editor *g, int argc, char *argv[],
-       char *rs, char *re)
+       int rs, int re)
 {
 	/*
 	 * == :run wc — count lines, words, and bytes in the range ==
@@ -1455,11 +1561,13 @@ run_wc(struct editor *g, int argc, char *argv[],
 	 * N bytes" on the status bar.  Does not modify the buffer.
 	 */
 	int lines = 0, words = 0, bytes = 0, in_word = 0;
+	char *rb = text_copy(g, rs, re - rs + 1);
+	char *rbe = rb + (re - rs);
 	char *p;
 
 	(void)argc;
 	(void)argv;
-	for (p = rs; p <= re; p++) {
+	for (p = rb; p <= rbe; p++) {
 		unsigned char c = (unsigned char)*p;
 		bytes++;
 		if (c == '\n') {
@@ -1472,6 +1580,7 @@ run_wc(struct editor *g, int argc, char *argv[],
 			words++;
 		}
 	}
+	free(rb);
 	status_line(g, "%d lines  %d words  %d bytes", lines, words, bytes);
 }
 
@@ -1479,7 +1588,7 @@ run_wc(struct editor *g, int argc, char *argv[],
 
 static void
 run_highlight(struct editor *g, int argc, char *argv[],
-              char *rs, char *re)
+              int rs, int re)
 {
 	/*
 	 * == :run highlight — set or clear the persistent highlight pattern ==
@@ -1499,7 +1608,7 @@ run_highlight(struct editor *g, int argc, char *argv[],
 
 static void
 run_color_escape(struct editor *g, int argc, char *argv[],
-                 char *rs, char *re)
+                 int rs, int re)
 {
 	/*
 	 * == :run color-escape [on|off] — interpret SGR escapes as colour ==
@@ -1537,7 +1646,7 @@ run_color_escape(struct editor *g, int argc, char *argv[],
 
 	g->esc_sgr[0] = '\0';
 	screen_erase(g);
-	g->refresh_last_screenbegin = NULL;
+	g->refresh_last_screenbegin = -1;
 
 	if (g->color_escape && g->pager_mode)
 		status_line(g, "color-escape on (-p already stripped the escapes)");
@@ -1579,7 +1688,7 @@ static const struct run_entry run_table[] = {
 
 void
 run_dispatch(struct editor *g, int argc, char *argv[],
-             char *rs, char *re)
+             int rs, int re)
 {
 	/*
 	 * == Public entry point: dispatch a :run sub-command by name ==

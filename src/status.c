@@ -73,7 +73,7 @@ format_edit_status(struct editor *g)
 	const char *fmt;
 	char *buf;
 
-	cur = count_lines(g, g->text, g->dot);
+	cur = count_lines(g, 0, g->dot);
 	if (g->modified_count != g->last_modified_count) {
 		g->status_tot = total_line_count(g);
 		g->last_modified_count = g->modified_count;

@@ -7,11 +7,11 @@ void dot_left(struct editor *g);
 void dot_right(struct editor *g);
 void dot_begin(struct editor *g);
 void dot_end(struct editor *g);
-char *move_to_col(struct editor *g, char *p, int l);
+int move_to_col(struct editor *g, int p, int l);
 void dot_next(struct editor *g);
 void dot_prev(struct editor *g);
-char *next_empty_line(struct editor *g, char *p);
-char *prev_empty_line(struct editor *g, char *p);
+int next_empty_line(struct editor *g, int p);
+int prev_empty_line(struct editor *g, int p);
 void dot_skip_over_ws(struct editor *g);
 void dot_to_char(struct editor *g, int cmd);
 void motion_run_repeat_search_same_cmd(struct editor *g);
@@ -35,6 +35,6 @@ void motion_run_line_end_cmd(struct editor *g);
 int motion_run_paragraph_cmd(struct editor *g, int c);
 void motion_run_scroll_to_screenpos_cmd(struct editor *g, const struct cmd_ctx *ctx);
 void dot_scroll(struct editor *g, int cnt, int dir);
-char *bound_dot(struct editor *g, char *p);
+int bound_dot(struct editor *g, int p);
 
 #endif

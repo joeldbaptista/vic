@@ -21,6 +21,10 @@
 #include "buffer.h"
 #include "screen.h"
 #include "status.h"
+#include "text.h"
+
+static void undo_record(struct editor *g, const char *bytes, int start,
+                        unsigned length, int u_type);
 
 static void
 push_undo_entry(struct undo_object **stack_tail,
@@ -45,8 +49,9 @@ undo_queue_commit(struct editor *g)
 	 * bundle.  No-op when the queue is empty.
 	 */
 	if (g->undo_q > 0) {
-		undo_push(g, g->undo_queue + UNDO_QUEUE_MAX - g->undo_q,
-		          g->undo_q, (g->undo_queue_state | UNDO_USE_SPOS));
+		undo_record(g, g->undo_queue + UNDO_QUEUE_MAX - g->undo_q,
+		            g->undo_queue_spos, (unsigned)g->undo_q,
+		            g->undo_queue_state);
 		g->undo_queue_state = UNDO_EMPTY;
 		g->undo_q = 0;
 	}
@@ -76,7 +81,7 @@ flush_undo_data(struct editor *g)
 }
 
 void
-undo_push(struct editor *g, char *src, unsigned length, int u_type)
+undo_push(struct editor *g, int src, unsigned length, int u_type)
 {
 	/*
 	 * == Record a buffer mutation for later undo ==
@@ -93,7 +98,7 @@ undo_push(struct editor *g, char *src, unsigned length, int u_type)
 	 * - Clears the redo stack on every direct push (a new edit invalidates
 	 *   the redo history).
 	 */
-	struct undo_object *undo_entry;
+	char *bytes;
 	int use_spos = u_type & UNDO_USE_SPOS;
 
 	switch (u_type) {
@@ -109,7 +114,8 @@ undo_push(struct editor *g, char *src, unsigned length, int u_type)
 		case UNDO_DEL:
 			g->undo_queue_spos = src;
 			g->undo_q++;
-			g->undo_queue[UNDO_QUEUE_MAX - g->undo_q] = *src;
+			g->undo_queue[UNDO_QUEUE_MAX - g->undo_q] =
+			    (char)text_char(g, src);
 			if (g->undo_q == UNDO_QUEUE_MAX)
 				undo_queue_commit(g);
 			return;
@@ -142,7 +148,30 @@ undo_push(struct editor *g, char *src, unsigned length, int u_type)
 		break;
 	}
 
-	u_type &= ~UNDO_USE_SPOS;
+	bytes = NULL;
+	if ((u_type & ~UNDO_USE_SPOS) == UNDO_SWAP ||
+	    (u_type & ~UNDO_USE_SPOS) == UNDO_DEL ||
+	    (u_type & ~UNDO_USE_SPOS) == UNDO_DEL_CHAIN)
+		bytes = text_copy(g, src, (int)length);
+	undo_record(g, bytes, use_spos ? g->undo_queue_spos : src, length,
+	            u_type & ~UNDO_USE_SPOS);
+	free(bytes);
+}
+
+static void
+undo_record(struct editor *g, const char *bytes, int start,
+            unsigned length, int u_type)
+{
+	/*
+	 * == Push one undo entry for `length` bytes at offset `start` ==
+	 *
+	 * The tail of undo_push(), split out because a committed queue
+	 * supplies its bytes from g->undo_queue rather than from the text.
+	 * bytes holds the deleted (or swapped) bytes; it is ignored for
+	 * insertions.  Discards the redo stack, as any new edit does.
+	 */
+	struct undo_object *undo_entry;
+
 	while (g->redo_stack_tail) {
 		struct undo_object *redo_entry = g->redo_stack_tail;
 		g->redo_stack_tail = redo_entry->prev;
@@ -152,20 +181,17 @@ undo_push(struct editor *g, char *src, unsigned length, int u_type)
 	if (u_type == UNDO_SWAP) {
 		/* Save the exact original bytes without truncation. */
 		undo_entry = xzalloc(offsetof(struct undo_object, undo_text) + length);
-		memcpy(undo_entry->undo_text, src, length);
+		memcpy(undo_entry->undo_text, bytes, length);
 	} else if (u_type == UNDO_DEL || u_type == UNDO_DEL_CHAIN) {
-		if ((g->text + length) == g->end)
+		if ((int)length == text_len(g))
 			length--;
 		undo_entry = xzalloc(offsetof(struct undo_object, undo_text) + length);
-		memcpy(undo_entry->undo_text, src, length);
+		memcpy(undo_entry->undo_text, bytes, length);
 	} else {
 		undo_entry = xzalloc(sizeof(*undo_entry));
 	}
 	undo_entry->length = length;
-	if (use_spos)
-		undo_entry->start = g->undo_queue_spos - g->text;
-	else
-		undo_entry->start = src - g->text;
+	undo_entry->start = start;
 	undo_entry->u_type = u_type;
 
 	push_undo_entry(&g->undo_stack_tail, undo_entry);
@@ -173,7 +199,7 @@ undo_push(struct editor *g, char *src, unsigned length, int u_type)
 }
 
 void
-undo_push_insert(struct editor *g, char *p, int len, int undo)
+undo_push_insert(struct editor *g, int p, int len, int undo)
 {
 	/*
 	 * == Record an insertion for undo, routing to the right entry type ==
@@ -208,7 +234,12 @@ new_undo_entry(uint8_t u_type, int start, int length,
 	 */
 	struct undo_object *undo_entry;
 
-	if (u_type == UNDO_DEL || u_type == UNDO_DEL_CHAIN) {
+	if (u_type == UNDO_DEL || u_type == UNDO_DEL_CHAIN ||
+	    u_type == UNDO_SWAP) {
+		/*
+		 * A SWAP inverse needs its bytes too: without them, redo of an
+		 * undone :run upper read past the end of the entry.
+		 */
 		undo_entry =
 		    xzalloc(offsetof(struct undo_object, undo_text) + (size_t)length);
 		if (length > 0 && text)
@@ -252,8 +283,9 @@ apply_undo_stack(struct editor *g, struct undo_object **from_stack,
 	 * it applies only one of its entries — for a delete+insert replace
 	 * that means the redo deletes the range and never re-inserts it.
 	 */
-	char *u_start;
-	char *u_end;
+	int u_start;
+	int u_end;
+	char *saved;
 	struct undo_object *undo_entry;
 	struct undo_object *inverse;
 	int chain;
@@ -275,9 +307,9 @@ apply_undo_stack(struct editor *g, struct undo_object **from_stack,
 		switch (undo_entry->u_type) {
 		case UNDO_DEL:
 		case UNDO_DEL_CHAIN:
-			u_start = g->text + undo_entry->start;
-			text_hole_make(g, u_start, undo_entry->length);
-			memcpy(u_start, undo_entry->undo_text, (size_t)undo_entry->length);
+			u_start = undo_entry->start;
+			text_insert_bytes(g, u_start, undo_entry->undo_text,
+			                  undo_entry->length);
 			inverse = new_undo_entry(
 			    first ? UNDO_INS : UNDO_INS_CHAIN,
 			    undo_entry->start, undo_entry->length, NULL);
@@ -290,11 +322,13 @@ apply_undo_stack(struct editor *g, struct undo_object **from_stack,
 			break;
 		case UNDO_INS:
 		case UNDO_INS_CHAIN:
-			u_start = undo_entry->start + g->text;
+			u_start = undo_entry->start;
 			u_end = u_start - 1 + undo_entry->length;
+			saved = text_copy(g, u_start, undo_entry->length);
 			inverse = new_undo_entry(
 			    first ? UNDO_DEL : UNDO_DEL_CHAIN,
-			    undo_entry->start, undo_entry->length, u_start);
+			    undo_entry->start, undo_entry->length, saved);
+			free(saved);
 			text_hole_delete(g, u_start, u_end, NO_UNDO);
 
 			status_line(g, "%s [%d] %s %d chars at position %d", op_label,
@@ -304,13 +338,18 @@ apply_undo_stack(struct editor *g, struct undo_object **from_stack,
 			chain = (undo_entry->u_type == UNDO_INS_CHAIN);
 			break;
 		case UNDO_SWAP:
-			u_start = g->text + undo_entry->start;
+			u_start = undo_entry->start;
 			/* Create inverse entry by saving the current (possibly converted)
 			 * bytes before overwriting them. */
+			saved = text_copy(g, u_start, undo_entry->length);
 			inverse = new_undo_entry(UNDO_SWAP, undo_entry->start, undo_entry->length,
-			                         u_start);
-			/* Restore original bytes — pure memcpy, no memmove. */
-			memcpy(u_start, undo_entry->undo_text, (size_t)undo_entry->length);
+			                         saved);
+			free(saved);
+			/* Restore the original bytes in place: same length, so no
+			 * offset after them moves. */
+			ptdelete(g->pt, (size_t)u_start, (size_t)undo_entry->length);
+			ptinsert(g->pt, (size_t)u_start, undo_entry->undo_text,
+			         (size_t)undo_entry->length);
 
 			status_line(g, "%s [%d] %s %d chars at position %d", op_label,
 			            g->modified_count, "swapped", undo_entry->length,
@@ -324,7 +363,7 @@ apply_undo_stack(struct editor *g, struct undo_object **from_stack,
 		}
 
 		if (!chain)
-			g->dot = g->text + undo_entry->start;
+			g->dot = undo_entry->start;
 
 		*from_stack = undo_entry->prev;
 		free(undo_entry);
@@ -475,11 +514,14 @@ buf_checksum(const struct editor *g)
 	 * and the undo history is no longer valid.
 	 */
 	uint32_t s = 0;
-	const unsigned char *p = (const unsigned char *)g->text;
-	const unsigned char *e = (const unsigned char *)g->end;
+	const unsigned char *p;
+	size_t o;
+	size_t n;
+	size_t i;
 
-	while (p < e)
-		s += *p++;
+	for (o = 0; (p = (const unsigned char *)ptchunk(g->pt, o, &n)); o += n)
+		for (i = 0; i < n; i++)
+			s += p[i];
 	return s;
 }
 

@@ -28,6 +28,7 @@
 #include "motion.h"
 #include "range.h"
 #include "status.h"
+#include "text.h"
 #include "undo.h"
 
 enum {
@@ -178,15 +179,15 @@ yank_sync_in(struct editor *g)
 		g->regtype[g->ydreg] = PARTIAL;
 }
 
-char *
-text_yank(struct editor *g, char *p, char *q, int dest, int buftype)
+int
+text_yank(struct editor *g, int p, int q, int dest, int buftype)
 {
 	/*
 	 * == Copy text [p, q] into register dest ==
 	 *
 	 * Allocates a NUL-terminated copy, sets regtype, frees the previous
 	 * content, and writes through to the yank-file for the shared (+) and
-	 * current ydreg registers.  Returns p (the normalised start pointer).
+	 * current ydreg registers.  Returns p (the normalised start offset).
 	 * Handles reversed p/q by swapping them.
 	 */
 	char *oldreg = g->reg[dest];
@@ -196,7 +197,7 @@ text_yank(struct editor *g, char *p, char *q, int dest, int buftype)
 		p = q;
 		cnt = -cnt;
 	}
-	g->reg[dest] = xstrndup(p, cnt + 1);
+	g->reg[dest] = text_copy(g, p, cnt + 1);
 	g->regtype[dest] = buftype;
 	free(oldreg);
 
@@ -248,8 +249,8 @@ yank_status(struct editor *g, const char *op, const char *p, int cnt)
 	            chars * cnt, what_reg(g));
 }
 
-char *
-yank_delete(struct editor *g, char *start, char *stop, int buftype,
+int
+yank_delete(struct editor *g, int start, int stop, int buftype,
             int do_delete, int undo, int dest_reg)
 {
 	/*
@@ -260,14 +261,14 @@ yank_delete(struct editor *g, char *start, char *stop, int buftype,
 	 * a newline (boundary condition for empty lines).
 	 * Returns the new dot after deletion, or start for yank-only.
 	 */
-	char *p;
+	int p;
 
 	if (start > stop) {
 		p = start;
 		start = stop;
 		stop = p;
 	}
-	if (buftype == PARTIAL && *start == '\n')
+	if (buftype == PARTIAL && text_char(g, start) == '\n')
 		return start;
 	p = start;
 	text_yank(g, start, stop, dest_reg, buftype);
@@ -277,8 +278,8 @@ yank_delete(struct editor *g, char *start, char *stop, int buftype,
 	return p;
 }
 
-char *
-yank_delete_current(struct editor *g, char *start, char *stop,
+int
+yank_delete_current(struct editor *g, int start, int stop,
                     int buftype, int yf, int undo)
 {
 	/*
@@ -309,9 +310,9 @@ operator_run_change_delete_yank_cmd(struct editor *g, const struct cmd_ctx *ctx)
 	int c = (int)(unsigned char)ctx->op;
 	int yf = YANKDEL;
 	int buftype;
-	char *p;
-	char *q;
-	char *save_dot = NULL;
+	int p;
+	int q;
+	int save_dot = -1;
 	char *savereg = g->reg[g->ydreg];
 
 	if (c == 'y' || c == 'Y')
@@ -336,7 +337,7 @@ operator_run_change_delete_yank_cmd(struct editor *g, const struct cmd_ctx *ctx)
 		if (c == 'c') {
 			g->cmd_mode = 1;
 			g->dot = char_insert(g, g->dot, '\n', ALLOW_UNDO_CHAIN);
-			if (g->dot != (g->end - 1) && !IS_AUTOINDENT(g))
+			if (g->dot != (text_len(g) - 1) && !IS_AUTOINDENT(g))
 				dot_prev(g);
 		} else if (c == 'd') {
 			dot_begin(g);
@@ -369,17 +370,16 @@ operator_run_filter_cmd(struct editor *g, const struct cmd_ctx *ctx)
 	 * boundaries before it is handed to filter_prompt_and_run().
 	 *
 	 * range_find() moves g->dot as a side effect of running the motion,
-	 * so the original position is saved as an offset (a pointer would go
-	 * stale if the filter reallocs the text store) and restored when the
+	 * so the original offset is saved and restored when the
 	 * filter did not run — the user pressed ESC at the prompt, or the
 	 * command exited non-zero and left the buffer untouched.
 	 */
-	char *p;
-	char *q;
-	uintptr_t dot_off;
+	int p;
+	int q;
+	int dot_off;
 	int pre_modified;
 
-	dot_off = (uintptr_t)(g->dot - g->text);
+	dot_off = g->dot;
 
 	if (range_find(g, &p, &q, ctx) == -1) {
 		reset_ydreg(g);
@@ -392,7 +392,7 @@ operator_run_filter_cmd(struct editor *g, const struct cmd_ctx *ctx)
 	pre_modified = g->modified_count;
 	filter_prompt_and_run(g, p, q, ":!");
 	if (g->modified_count == pre_modified)
-		g->dot = g->text + dot_off;
+		g->dot = dot_off;
 	reset_ydreg(g);
 }
 
@@ -411,16 +411,16 @@ operator_run_delete_or_substitute_cmd(struct editor *g, const struct cmd_ctx *ct
 	int allow_undo = ALLOW_UNDO;
 
 	do {
-		char *start;
-		char *stop;
+		int start;
+		int stop;
 
 		if (c == 'X') {
-			if (g->dot <= g->text || g->dot[-1] == '\n')
+			if (g->dot <= 0 || text_char(g, g->dot - 1) == '\n')
 				continue;
 			start = cp_prev(g, cp_start(g, g->dot));
 		} else {
 			start = cp_start(g, g->dot);
-			if (*start == '\n')
+			if (text_char(g, start) == '\n')
 				continue;
 		}
 		stop = cp_end(g, start) - 1;
@@ -443,7 +443,7 @@ operator_run_change_or_delete_eol_cmd(struct editor *g, const struct cmd_ctx *ct
 	 * (dollar_line position).  C enters INSERT mode; D resets the register.
 	 */
 	int c = (int)(unsigned char)ctx->op;
-	char *save_dot;
+	int save_dot;
 
 	save_dot = g->dot;
 	g->dot = dollar_line(g, g->dot);
@@ -503,10 +503,10 @@ operator_run_flip_case_cmd(struct editor *g)
 	int undo_del = UNDO_DEL;
 
 	do {
-		unsigned char ch = (unsigned char)*g->dot;
+		unsigned char ch = (unsigned char)text_char(g, g->dot);
 		if (ch < UTF8_MULTIBYTE_MIN && isalpha(ch)) {
 			undo_push(g, g->dot, 1, undo_del);
-			*g->dot = islower(ch) ? toupper(ch) : tolower(ch);
+			text_set_char(g, g->dot, islower(ch) ? toupper(ch) : tolower(ch));
 			undo_push(g, g->dot, 1, UNDO_INS_CHAIN);
 			undo_del = UNDO_DEL_CHAIN;
 		}

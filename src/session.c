@@ -237,6 +237,8 @@ init_globals(struct editor *g)
 	 * color_escape from config.h, and allocates the initial
 	 * last_search_pattern buffer.
 	 */
+	int i;
+
 	g->session_epoch = time(NULL);
 	g->last_modified_count = -1;
 	g->tabstop = CFG_TABSTOP;
@@ -255,6 +257,14 @@ init_globals(struct editor *g)
 	g->refresh_last_modified_count = INT_MIN;
 	g->last_search_pattern = xzalloc(2);
 	g->undo_queue_state = UNDO_EMPTY;
+	/* -1 is "no position" for every offset the old code left NULL */
+	g->rstart = -1;
+	g->visual_anchor = -1;
+	g->refresh_last_screenbegin = -1;
+	g->undo_queue_spos = -1;
+	g->dot_line = -1;
+	for (i = 0; i < (int)ARRAY_SIZE(g->mark); i++)
+		g->mark[i] = -1;
 }
 
 static int

@@ -21,6 +21,7 @@
 #include "codepoint.h"
 #include "input.h"
 #include "line.h"
+#include "text.h"
 #include "undo.h"
 
 void
@@ -37,7 +38,7 @@ dot_left(struct editor *g)
 	 */
 	undo_queue_commit(g);
 	g->dot = cp_start(g, g->dot);
-	if (g->dot > g->text && g->dot[-1] != '\n')
+	if (g->dot > 0 && text_char(g, g->dot - 1) != '\n')
 		g->dot = esc_snap_bwd(g, cp_prev(g, g->dot));
 }
 
@@ -56,7 +57,7 @@ dot_right(struct editor *g)
 	 */
 	undo_queue_commit(g);
 	g->dot = esc_snap_fwd(g, cp_start(g, g->dot));
-	if (g->dot < g->end - 1 && *g->dot != '\n')
+	if (g->dot < text_len(g) - 1 && text_char(g, g->dot) != '\n')
 		g->dot = esc_snap_fwd(g, cp_next(g, g->dot));
 }
 
@@ -83,8 +84,8 @@ dot_end(struct editor *g)
 	g->dot = end_line(g, g->dot);
 }
 
-char *
-move_to_col(struct editor *g, char *p, int l)
+int
+move_to_col(struct editor *g, int p, int l)
 {
 	/*
 	 * == Walk p to the target column l on its line ==
@@ -100,12 +101,12 @@ move_to_col(struct editor *g, char *p, int l)
 
 	p = begin_line(g, p);
 	co = 0;
-	while (p < g->end) {
+	while (p < text_len(g)) {
 		int nco;
-		char *next;
-		char *sk;
+		int next;
+		int sk;
 
-		if (*p == '\n')
+		if (text_char(g, p) == '\n')
 			break;
 		sk = esc_skip(g, p);
 		if (sk != p) {
@@ -144,48 +145,48 @@ dot_prev(struct editor *g)
 	g->dot = prev_line(g, g->dot);
 }
 
-char *
-next_empty_line(struct editor *g, char *p)
+int
+next_empty_line(struct editor *g, int p)
 {
 	/*
-	 * == Pointer to the next empty line after p ==
+	 * == Offset of the next empty line after p ==
 	 *
 	 * An empty line is one whose only byte is '\n'.  Used by the }
-	 * paragraph-forward motion.  Returns NULL when no empty line exists
+	 * paragraph-forward motion.  Returns -1 when no empty line exists
 	 * after p.
 	 */
 	p = next_line(g, p);
-	while (p < g->end && *p != '\n') {
-		char *n = next_line(g, p);
+	while (p < text_len(g) && text_char(g, p) != '\n') {
+		int n = next_line(g, p);
 		if (n == p)
-			return NULL;
+			return -1;
 		p = n;
 	}
-	if (p < g->end && *p == '\n')
+	if (p < text_len(g) && text_char(g, p) == '\n')
 		return p;
-	return NULL;
+	return -1;
 }
 
-char *
-prev_empty_line(struct editor *g, char *p)
+int
+prev_empty_line(struct editor *g, int p)
 {
 	/*
-	 * == Pointer to the previous empty line before p ==
+	 * == Offset of the previous empty line before p ==
 	 *
 	 * An empty line is one whose only byte is '\n'.  Used by the {
-	 * paragraph-backward motion.  Returns NULL when no empty line exists
+	 * paragraph-backward motion.  Returns -1 when no empty line exists
 	 * before p.
 	 */
 	p = prev_line(g, p);
-	while (p >= g->text && *p != '\n') {
-		char *n = prev_line(g, p);
+	while (p >= 0 && text_char(g, p) != '\n') {
+		int n = prev_line(g, p);
 		if (n == p)
-			return NULL;
+			return -1;
 		p = n;
 	}
-	if (p >= g->text && *p == '\n')
+	if (p >= 0 && text_char(g, p) == '\n')
 		return p;
-	return NULL;
+	return -1;
 }
 
 void
@@ -198,8 +199,8 @@ dot_skip_over_ws(struct editor *g)
 	 * newlines and non-whitespace.  Called after line-motion commands to
 	 * land the cursor on the first non-blank column.
 	 */
-	while (g->dot < g->end - 1) {
-		unsigned char c = (unsigned char)*g->dot;
+	while (g->dot < text_len(g) - 1) {
+		unsigned char c = (unsigned char)text_char(g, g->dot);
 
 		if (!(c < UTF8_MULTIBYTE_MIN && isspace(c)) || c == '\n')
 			break;
@@ -222,7 +223,7 @@ dot_to_char(struct editor *g, int cmd)
 	 *
 	 * - Calls indicate_error when the character is not found on the line.
 	 */
-	char *q = cp_start(g, g->dot);
+	int q = cp_start(g, g->dot);
 	int dir = islower(cmd) ? 1 : -1;
 
 	if (g->last_search_char == 0)
@@ -232,24 +233,24 @@ dot_to_char(struct editor *g, int cmd)
 		do {
 			if (dir > 0) {
 				q = cp_next(g, q);
-				if (q > g->end - 1 || *q == '\n') {
+				if (q > text_len(g) - 1 || text_char(g, q) == '\n') {
 					indicate_error(g);
 					return;
 				}
 			} else {
-				if (q <= g->text) {
+				if (q <= 0) {
 					indicate_error(g);
 					return;
 				}
 				q = cp_prev(g, q);
-				if (*q == '\n') {
+				if (text_char(g, q) == '\n') {
 					indicate_error(g);
 					return;
 				}
 			}
-			if ((unsigned char)*q == (unsigned char)g->last_search_char)
+			if ((unsigned char)text_char(g, q) == (unsigned char)g->last_search_char)
 				break;
-			if (q == g->text && dir < 0) {
+			if (q == 0 && dir < 0) {
 				indicate_error(g);
 				return;
 			}
@@ -379,7 +380,7 @@ motion_run_goto_line_cmd(struct editor *g)
 	 * With a count n: jumps to line n (1-based), landing on the first
 	 * non-blank character.
 	 */
-	g->dot = g->end - 1;
+	g->dot = text_len(g) - 1;
 	if (g->cmdcnt > 0)
 		g->dot = find_line(g, g->cmdcnt);
 	dot_begin(g);
@@ -417,12 +418,12 @@ motion_run_prev_empty_line_cmd(struct editor *g)
 	 * Jumps g->cmdcnt empty lines backward.  Calls indicate_error and
 	 * returns early when no more empty lines exist.
 	 */
-	char *p;
-	char *q = g->dot;
+	int p;
+	int q = g->dot;
 
 	do {
 		p = prev_empty_line(g, q);
-		if (p == NULL) {
+		if (p == -1) {
 			indicate_error(g);
 			return;
 		}
@@ -441,12 +442,12 @@ motion_run_next_empty_line_cmd(struct editor *g)
 	 * Jumps g->cmdcnt empty lines forward.  Calls indicate_error and
 	 * returns early when no more empty lines exist.
 	 */
-	char *p;
-	char *q = g->dot;
+	int p;
+	int q = g->dot;
 
 	do {
 		p = next_empty_line(g, q);
-		if (p == NULL) {
+		if (p == -1) {
 			indicate_error(g);
 			return;
 		}
@@ -473,8 +474,8 @@ motion_run_next_line_keep_col_cmd(struct editor *g)
 	 * that case we pass a very large column to move_to_col so it walks to
 	 * the last character on the destination line.
 	 */
-	char *p;
-	char *q = g->dot;
+	int p;
+	int q = g->dot;
 	int col;
 
 	if (g->cindex < 0)
@@ -516,8 +517,8 @@ motion_run_prev_line_keep_col_cmd(struct editor *g)
 	 * Mirror of motion_run_next_line_keep_col_cmd; see its comment for the
 	 * rationale behind prev_keep_index and the sticky column logic.
 	 */
-	char *p;
-	char *q = g->dot;
+	int p;
+	int q = g->dot;
 	int col;
 
 	if (g->cindex < 0)
@@ -550,8 +551,8 @@ motion_run_next_line_skip_ws_cmd(struct editor *g)
 	/*
 	 * == Move to the next line, landing on the first non-blank (CR / +) ==
 	 */
-	char *p;
-	char *q = g->dot;
+	int p;
+	int q = g->dot;
 
 	do {
 		p = next_line(g, q);
@@ -572,8 +573,8 @@ motion_run_prev_line_skip_ws_cmd(struct editor *g)
 	/*
 	 * == Move to the previous line, landing on the first non-blank (- / k-) ==
 	 */
-	char *p;
-	char *q = g->dot;
+	int p;
+	int q = g->dot;
 
 	do {
 		p = prev_line(g, q);
@@ -626,10 +627,10 @@ motion_run_paragraph_cmd(struct editor *g, int c)
 	dir = c == '}' ? 1 : -1;
 	do {
 		int skip = TRUE;
-		while (dir == 1 ? g->dot < g->end - 1 : g->dot > g->text) {
-			char *adj =
+		while (dir == 1 ? g->dot < text_len(g) - 1 : g->dot > 0) {
+			int adj =
 			    (dir == 1) ? cp_next(g, g->dot) : cp_prev(g, g->dot);
-			if (*g->dot == '\n' && *adj == '\n') {
+			if (text_char(g, g->dot) == '\n' && text_char(g, adj) == '\n') {
 				if (!skip) {
 					if (dir == 1)
 						g->dot = adj;
@@ -680,7 +681,7 @@ dot_scroll(struct editor *g, int cnt, int dir)
 	 * lines, then clamps g->dot to stay within the visible window.
 	 * Used by Ctrl-E/Y and the z scroll commands.
 	 */
-	char *q;
+	int q;
 
 	undo_queue_commit(g);
 	for (; cnt > 0; cnt--) {
@@ -697,25 +698,25 @@ dot_scroll(struct editor *g, int cnt, int dir)
 	dot_skip_over_ws(g);
 }
 
-char *
-bound_dot(struct editor *g, char *p)
+int
+bound_dot(struct editor *g, int p)
 {
 	/*
 	 * == Clamp p to a valid buffer position ==
 	 *
-	 * Ensures p is within [g->text, g->end - 1] and snapped to a codepoint
+	 * Ensures p is within [0, text_len(g) - 1] and snapped to a codepoint
 	 * start.  Calls indicate_error when clamping was necessary.
 	 * Used at operator-range boundaries to prevent out-of-bounds access.
 	 */
-	if (p >= g->end && g->end > g->text) {
-		p = g->end - 1;
+	if (p >= text_len(g) && text_len(g) > 0) {
+		p = text_len(g) - 1;
 		indicate_error(g);
 	}
-	if (p < g->text) {
-		p = g->text;
+	if (p < 0) {
+		p = 0;
 		indicate_error(g);
 	}
-	if (p > g->text && p < g->end)
+	if (p > 0 && p < text_len(g))
 		p = cp_start(g, p);
 	return p;
 }

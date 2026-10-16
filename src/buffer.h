@@ -3,16 +3,16 @@
 
 #include "vic.h"
 
-uintptr_t text_hole_make(struct editor *g, char *p, int size);
-char *text_hole_delete(struct editor *g, char *p, char *q, int undo);
-int file_insert(struct editor *g, const char *fn, char *p, int initial);
-char *char_insert(struct editor *g, char *p, char c, int undo);
+int text_insert_bytes(struct editor *g, int p, const char *s, int n);
+int text_hole_delete(struct editor *g, int p, int q, int undo);
+int file_insert(struct editor *g, const char *fn, int p, int initial);
+int char_insert(struct editor *g, int p, char c, int undo);
 void init_filename(struct editor *g, char *fn);
 void update_filename(struct editor *g, char *fn);
 int init_text_buffer(struct editor *g, char *fn);
-uintptr_t string_insert(struct editor *g, char *p, const char *s, int undo);
-uintptr_t buffer_replace_range(struct editor *g, char *rs, char *re,
-                               const char *new_buf, int new_len);
-int file_write(struct editor *g, char *fn, char *first, char *last);
+int string_insert(struct editor *g, int p, const char *s, int undo);
+int buffer_replace_range(struct editor *g, int rs, int re,
+                         const char *new_buf, int new_len);
+int file_write(struct editor *g, char *fn, int first, int last);
 
 #endif

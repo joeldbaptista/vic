@@ -3,18 +3,18 @@
 
 #include "vic.h"
 
-char *begin_line(struct editor *g, char *p);
-char *end_line(struct editor *g, char *p);
-char *dollar_line(struct editor *g, char *p);
-char *prev_line(struct editor *g, char *p);
-char *next_line(struct editor *g, char *p);
-char *end_screen(struct editor *g);
-int count_lines(struct editor *g, char *start, char *stop);
+int begin_line(struct editor *g, int p);
+int end_line(struct editor *g, int p);
+int dollar_line(struct editor *g, int p);
+int prev_line(struct editor *g, int p);
+int next_line(struct editor *g, int p);
+int end_screen(struct editor *g);
+int count_lines(struct editor *g, int start, int stop);
 int total_line_count(struct editor *g);
-char *find_line(struct editor *g, int li);
+int find_line(struct editor *g, int li);
 int next_tabstop(struct editor *g, int col);
 int prev_tabstop(struct editor *g, int col);
-int at_eof(struct editor *g, const char *s);
-size_t indent_len(struct editor *g, char *p);
+int at_eof(struct editor *g, int s);
+size_t indent_len(struct editor *g, int p);
 
 #endif
