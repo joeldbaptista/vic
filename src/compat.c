@@ -13,6 +13,8 @@
  */
 #include "vic.h"
 
+#define VERSION_STR	"version: experimental-piece-tree"
+
 __attribute__((noreturn)) void
 die(const char *msg)
 {
@@ -40,7 +42,9 @@ show_usage(void)
 	                "[-c CMD] "
 	                "[-R] "
 	                "[-p] "
-	                "[-H] [FILE|-]...\n");
+	                "[-H] [FILE|-]...\n"
+			 VERSION_STR
+			"\n");
 }
 
 void *
