@@ -7,11 +7,11 @@
  * A run_fn receives:
  *   g           — editor state (buffer, cursor, undo, status bar, …)
  *   argc/argv   — argv[0] is the command name; argv[1..] are the extra args
- *   range_start — pointer to first byte of the address range
- *   range_end   — pointer to last  byte of the address range (inclusive)
+ *   range_start — offset of the first byte of the address range
+ *   range_end   — offset of the last byte of the address range (inclusive)
  *
- * When no address is given, range_start == g->text and
- * range_end == g->end - 1 (the entire buffer).
+ * When no address is given, range_start == 0 and
+ * range_end == text_len(g) - 1 (the entire buffer).
  *
  * Adding a new command:
  *   1. Write a run_fn in run.c (or a dedicated file).
@@ -21,7 +21,7 @@
 #include "vic.h"
 
 typedef void (*run_fn)(struct editor *g, int argc, char *argv[],
-                       char *range_start, char *range_end);
+                       int range_start, int range_end);
 
 struct run_entry {
 	const char *name;
@@ -33,6 +33,6 @@ struct run_entry {
  * Prints an error on the status bar if the command is not found.
  */
 void run_dispatch(struct editor *g, int argc, char *argv[],
-                  char *range_start, char *range_end);
+                  int range_start, int range_end);
 
 #endif /* SRC_RUN_H */
