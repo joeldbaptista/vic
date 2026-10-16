@@ -27,6 +27,7 @@
 #include "motion.h"
 #include "operator.h"
 #include "status.h"
+#include "text.h"
 
 void
 visual_block_insert_replay(struct editor *g)
@@ -46,28 +47,28 @@ visual_block_insert_replay(struct editor *g)
 	 * and other editing during the insert session are accounted for.
 	 *
 	 * Rows are processed bottom-to-top so that insertions at lower rows do
-	 * not shift the buffer positions of rows still to be processed.
-	 * Because text_hole_make may realloc g->text the realloc bias is
-	 * propagated to the remaining row-pointer array after each insertion.
+	 * not shift the buffer offsets of rows still to be processed.
+	 * The bias returned by string_insert is always 0 now; it is still
+	 * propagated to the remaining row-offset array after each insertion.
 	 */
-	char *insert_start;
+	int insert_start;
 	int insert_len;
 	char *insert_text;
-	char *row_top;
-	char *row_bot;
+	int row_top;
+	int row_bot;
 	int col;
 	int nrows;
-	char **rows;
+	int *rows;
 	int i;
 
-	insert_start = g->text + g->vis_block_insert_start_off;
+	insert_start = g->vis_block_insert_start_off;
 	insert_len = (int)(g->dot - insert_start) + 1;
 	if (insert_len <= 0)
 		return;
 
-	insert_text = xstrndup(insert_start, (size_t)insert_len);
+	insert_text = text_copy(g, insert_start, insert_len);
 
-	row_top = g->text + g->vis_block_row_top_off;
+	row_top = g->vis_block_row_top_off;
 	/*
 	 * vis_block_row_bot_off was recorded before the user typed anything.
 	 * All insert_len bytes were inserted on row_top (at insert_start_off),
@@ -75,7 +76,7 @@ visual_block_insert_replay(struct editor *g)
 	 * row_bot one byte forward, so the current begin_line of the bottom
 	 * row is at the saved offset + insert_len.
 	 */
-	row_bot = g->text + g->vis_block_row_bot_off + insert_len;
+	row_bot = g->vis_block_row_bot_off + insert_len;
 	col = g->vis_block_insert_col;
 
 	/* Count rows below row_top in the block. */
@@ -85,24 +86,24 @@ visual_block_insert_replay(struct editor *g)
 		return;
 	}
 
-	/* Collect begin_line pointers for rows row_top+1 .. row_bot. */
+	/* Collect begin_line offsets for rows row_top+1 .. row_bot. */
 	rows = xmalloc((size_t)nrows * sizeof(*rows));
 	{
-		char *r = next_line(g, row_top);
+		int r = next_line(g, row_top);
 		for (i = 0; i < nrows; i++, r = next_line(g, r))
 			rows[i] = r;
 	}
 
 	/*
-	 * Process bottom-to-top.  After each insertion the bias from any
-	 * realloc is applied to rows not yet processed (they come before the
-	 * insertion point in the buffer and are therefore not memmove'd, but
-	 * they do need the realloc bias applied).
+	 * Process bottom-to-top.  After each insertion the bias returned by
+	 * string_insert (always 0 now) is applied to rows not yet processed
+	 * (they come before the insertion point in the buffer, so their
+	 * offsets do not change).
 	 */
 	for (i = nrows - 1; i >= 0; i--) {
-		char *p = move_to_col(g, rows[i], col);
+		int p = move_to_col(g, rows[i], col);
 		if (get_column(g, p) == col) {
-			uintptr_t bias = string_insert(g, p, insert_text,
+			int bias = string_insert(g, p, insert_text,
 			                               ALLOW_UNDO_CHAIN);
 			if (bias) {
 				int j;
@@ -126,9 +127,9 @@ visual_leave(struct editor *g)
 	 * MARK_GT, expanding to line boundaries for line-visual mode.  Clears
 	 * all visual state so the editor returns to Normal mode.
 	 */
-	if (g->visual_anchor != NULL) {
-		char *a = cp_start(g, g->visual_anchor);
-		char *b = cp_start(g, g->dot);
+	if (g->visual_anchor != -1) {
+		int a = cp_start(g, g->visual_anchor);
+		int b = cp_start(g, g->dot);
 		if (g->visual_mode == 2) {
 			g->mark[MARK_LT] = begin_line(g, a < b ? a : b);
 			g->mark[MARK_GT] = end_line(g, a < b ? b : a);
@@ -138,9 +139,9 @@ visual_leave(struct editor *g)
 		}
 	}
 	g->visual_mode = 0;
-	g->visual_anchor = NULL;
+	g->visual_anchor = -1;
 	g->last_status_cksum = 0;
-	g->refresh_last_screenbegin = NULL;
+	g->refresh_last_screenbegin = -1;
 	g->vis_ai_pending = 0;
 	g->vis_reg_pending = 0;
 }
@@ -167,7 +168,7 @@ visual_enter(struct editor *g, int mode)
 }
 
 int
-visual_get_range(struct editor *g, char **start, char **stop,
+visual_get_range(struct editor *g, int *start, int *stop,
                  int *buftype)
 {
 	/*
@@ -180,12 +181,13 @@ visual_get_range(struct editor *g, char **start, char **stop,
 	 * buftype=MULTI if the selection spans multiple lines, PARTIAL otherwise.
 	 * Returns 1 if visual mode is active and range is set, 0 otherwise.
 	 */
-	char *a;
-	char *b;
-	char *s;
-	char *e;
+	int a;
+	int b;
+	int s;
+	int e;
+	int nl;
 
-	if (!g->visual_mode || g->visual_mode == 3 || g->visual_anchor == NULL)
+	if (!g->visual_mode || g->visual_mode == 3 || g->visual_anchor == -1)
 		return 0;
 
 	a = cp_start(g, g->visual_anchor);
@@ -208,21 +210,21 @@ visual_get_range(struct editor *g, char **start, char **stop,
 
 	*start = s;
 	*stop = e;
-	*buftype =
-	    memchr(s, '\n', (size_t)(e - s + 1)) ? MULTI : PARTIAL;
+	nl = text_find(g, s, '\n');
+	*buftype = (nl != -1 && nl <= e) ? MULTI : PARTIAL;
 	return 1;
 }
 
 void
 block_visual_cols(struct editor *g, int *col_left, int *col_right,
-                  char **row_top, char **row_bot)
+                  int *row_top, int *row_bot)
 {
 	/*
 	 * == Compute the column window and row span for block visual mode ==
 	 *
 	 * Returns the inclusive column range [col_left, col_right] and the
-	 * begin_line pointers for the top and bottom rows of the block.
-	 * Call only when visual_mode == 3 and visual_anchor != NULL.
+	 * begin_line offsets for the top and bottom rows of the block.
+	 * Call only when visual_mode == 3 and visual_anchor != -1.
 	 *
 	 * Parameters:
 	 *   g         — editor state
@@ -231,8 +233,8 @@ block_visual_cols(struct editor *g, int *col_left, int *col_right,
 	 *   row_top   — out: begin_line of the topmost selected row
 	 *   row_bot   — out: begin_line of the bottommost selected row
 	 */
-	char *a = g->visual_anchor;
-	char *b = g->dot;
+	int a = g->visual_anchor;
+	int b = g->dot;
 	int ca = get_column(g, a);
 	int cb = get_column(g, b);
 
@@ -267,12 +269,12 @@ block_selection_ranges(struct editor *g, int *count)
 	 */
 	struct block_range *ranges;
 	int col_left, col_right;
-	char *row_top, *row_bot;
+	int row_top, row_bot;
 	int nlines, n, i;
-	char *line;
+	int line;
 
 	*count = 0;
-	if (g->visual_mode != 3 || g->visual_anchor == NULL)
+	if (g->visual_mode != 3 || g->visual_anchor == -1)
 		return NULL;
 
 	block_visual_cols(g, &col_left, &col_right, &row_top, &row_bot);
@@ -283,19 +285,19 @@ block_selection_ranges(struct editor *g, int *count)
 
 	line = row_top;
 	for (i = 0; i < nlines; i++, line = next_line(g, line)) {
-		char *ptr = begin_line(g, line);
-		char *p = NULL, *q = NULL;
+		int ptr = begin_line(g, line);
+		int p = -1, q = -1;
 		int co = 0;
 
-		while (ptr < g->end && *ptr != '\n') {
-			char *nxt = cp_next(g, ptr);
-			char *sk = esc_skip(g, ptr);
+		while (ptr < text_len(g) && text_char(g, ptr) != '\n') {
+			int nxt = cp_next(g, ptr);
+			int sk = esc_skip(g, ptr);
 
 			if (sk != ptr) {
 				ptr = sk;
 				continue;
 			}
-			if (p == NULL) {
+			if (p == -1) {
 				if (co >= col_left) {
 					if (co > col_right)
 						break; /* tab swallows window; skip line */
@@ -312,8 +314,8 @@ block_selection_ranges(struct editor *g, int *count)
 			ptr = nxt;
 		}
 
-		if (p != NULL) {
-			if (q == NULL)
+		if (p != -1) {
+			if (q == -1)
 				q = ptr; /* clamp to eol or end-of-buffer */
 			ranges[n].p = p;
 			ranges[n].q = q;
@@ -360,7 +362,7 @@ block_op_yank(struct block_op_ctx *ctx)
 	dst = buf;
 	for (i = 0; i < ctx->count; i++) {
 		size_t len = (size_t)(ctx->ranges[i].q - ctx->ranges[i].p);
-		memcpy(dst, ctx->ranges[i].p, len);
+		text_read(g, ctx->ranges[i].p, (int)len, dst);
 		dst += len;
 		*dst++ = '\n';
 	}
@@ -381,19 +383,25 @@ block_op_case(struct block_op_ctx *ctx)
 	 * ranges are over-saved but restored to their unchanged values, which
 	 * is correct. */
 	struct editor *g = ctx->g;
-	char *span_start = ctx->ranges[0].p;
-	char *span_end = ctx->ranges[ctx->count - 1].q - 1;
-	char *p;
+	int span_start = ctx->ranges[0].p;
+	int span_end = ctx->ranges[ctx->count - 1].q - 1;
+	int p;
 	int i;
 
 	undo_push(g, span_start, (unsigned)(span_end - span_start + 1),
 	          UNDO_SWAP);
 	for (i = 0; i < ctx->count; i++) {
-		for (p = ctx->ranges[i].p; p < ctx->ranges[i].q; p++) {
-			unsigned char ch = (unsigned char)*p;
+		int n = ctx->ranges[i].q - ctx->ranges[i].p;
+		char *buf = text_copy(g, ctx->ranges[i].p, n);
+
+		for (p = 0; p < n; p++) {
+			unsigned char ch = (unsigned char)buf[p];
 			if (ch < UTF8_MULTIBYTE_MIN && isalpha(ch))
-				*p = (char)(ctx->op == 'U' ? toupper(ch) : tolower(ch));
+				buf[p] = (char)(ctx->op == 'U' ? toupper(ch)
+				                               : tolower(ch));
 		}
+		text_set_bytes(g, ctx->ranges[i].p, buf, n);
+		free(buf);
 	}
 	g->dot = ctx->ranges[0].p;
 	reset_ydreg(g);
@@ -404,20 +412,20 @@ block_op_indent(struct block_op_ctx *ctx)
 {
 	/* Indent/de-indent: operate on whole lines covering the block. */
 	struct editor *g = ctx->g;
-	char *row_top = begin_line(g, ctx->ranges[0].p);
-	char *row_bot_line = begin_line(g, ctx->ranges[ctx->count - 1].p);
+	int row_top = begin_line(g, ctx->ranges[0].p);
+	int row_bot_line = begin_line(g, ctx->ranges[ctx->count - 1].p);
 	int nlines = count_lines(g, row_top, row_bot_line);
 	int allow_undo = ALLOW_UNDO;
-	char *p;
+	int p;
 
 	g->dot = row_top;
 	for (p = row_top; nlines > 0; nlines--, p = next_line(g, p)) {
 		if (ctx->op == '<') {
-			if (*p == '\t') {
+			if (text_char(g, p) == '\t') {
 				text_hole_delete(g, p, p, allow_undo);
-			} else if (*p == ' ') {
+			} else if (text_char(g, p) == ' ') {
 				int j;
-				for (j = 0; *p == ' ' && j < g->tabstop; j++) {
+				for (j = 0; text_char(g, p) == ' ' && j < g->tabstop; j++) {
 					text_hole_delete(g, p, p, allow_undo);
 					allow_undo = ALLOW_UNDO_CHAIN;
 				}
@@ -435,7 +443,7 @@ static void
 block_op_delete(struct block_op_ctx *ctx)
 {
 	/* d/c (x and C are remapped to d/c by the caller before dispatch):
-	 * delete ranges bottom-to-top so earlier pointer values remain valid
+	 * delete ranges bottom-to-top so earlier offset values remain valid
 	 * through the deletions, then optionally enter INSERT mode. */
 	struct editor *g = ctx->g;
 	int allow_undo = ALLOW_UNDO;
@@ -490,8 +498,8 @@ static const struct block_op_entry block_op_table[] = {
 
 struct char_op_ctx {
 	struct editor *g;
-	char *start;
-	char *stop;
+	int start;
+	int stop;
 	int buftype;
 	int op;
 	char *put_copy;  /* only set/used for op == 'p' */
@@ -526,17 +534,27 @@ static void
 char_op_case(struct char_op_ctx *ctx)
 {
 	/* Save the exact original bytes as a single swap entry.  Undo restores
-	 * them with one memcpy — no memmove, no realloc. */
+	 * them with one same-length in-place replacement, so no offset moves.
+	 *
+	 * The case change itself runs over a copy of the selection and goes
+	 * back in one text_set_bytes().  Changing the bytes in the text one
+	 * at a time would cost a tree descent and a piece split each, which
+	 * takes minutes once the selection is large. */
 	struct editor *g = ctx->g;
-	char *p;
+	char *buf;
+	int n, i;
 
-	undo_push(g, ctx->start, (unsigned)(ctx->stop - ctx->start + 1),
-	          UNDO_SWAP);
-	for (p = ctx->start; p <= ctx->stop; p++) {
-		unsigned char ch = (unsigned char)*p;
+	n = ctx->stop - ctx->start + 1;
+	undo_push(g, ctx->start, (unsigned)n, UNDO_SWAP);
+	buf = text_copy(g, ctx->start, n);
+	for (i = 0; i < n; i++) {
+		unsigned char ch = (unsigned char)buf[i];
 		if (ch < UTF8_MULTIBYTE_MIN && isalpha(ch))
-			*p = (char)(ctx->op == 'U' ? toupper(ch) : tolower(ch));
+			buf[i] = (char)(ctx->op == 'U' ? toupper(ch)
+			                               : tolower(ch));
 	}
+	text_set_bytes(g, ctx->start, buf, n);
+	free(buf);
 	g->dot = ctx->start;
 	reset_ydreg(g);
 }
@@ -545,7 +563,7 @@ static void
 char_op_indent(struct char_op_ctx *ctx)
 {
 	struct editor *g = ctx->g;
-	char *p;
+	int p;
 	int allow_undo = ALLOW_UNDO;
 	int nlines = count_lines(g, ctx->start, ctx->stop);
 
@@ -553,11 +571,11 @@ char_op_indent(struct char_op_ctx *ctx)
 	for (p = begin_line(g, ctx->start); nlines > 0;
 	     nlines--, p = next_line(g, p)) {
 		if (ctx->op == '<') {
-			if (*p == '\t') {
+			if (text_char(g, p) == '\t') {
 				text_hole_delete(g, p, p, allow_undo);
-			} else if (*p == ' ') {
+			} else if (text_char(g, p) == ' ') {
 				int j;
-				for (j = 0; *p == ' ' && j < g->tabstop; j++) {
+				for (j = 0; text_char(g, p) == ' ' && j < g->tabstop; j++) {
 					text_hole_delete(g, p, p, allow_undo);
 					allow_undo = ALLOW_UNDO_CHAIN;
 				}
@@ -593,7 +611,7 @@ char_op_filter(struct char_op_ctx *ctx)
 	 *
 	 * Like the normal-mode ! operator, filtering is always linewise, so
 	 * the selection is expanded to whole lines.  The resolved range is
-	 * passed as pointers rather than through the '< '> marks, so the
+	 * passed as offsets rather than through the '< '> marks, so the
 	 * marks visual_leave() just set stay as the user's last selection.
 	 */
 	struct editor *g = ctx->g;
@@ -643,7 +661,7 @@ visual_apply_operator(struct editor *g, int op)
 	 * key handling elsewhere in the editor.
 	 *
 	 * Calls visual_leave() before mutating the buffer so that the `< and
-	 * `> marks are set correctly before any pointer adjustment.
+	 * `> marks are set correctly before any offset adjustment.
 	 */
 	char *saved_reg = g->reg[g->ydreg];
 
@@ -682,8 +700,8 @@ visual_apply_operator(struct editor *g, int op)
 
 	{
 		struct char_op_ctx ctx;
-		char *start;
-		char *stop;
+		int start;
+		int stop;
 		int buftype;
 		int i;
 
