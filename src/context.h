@@ -4,6 +4,6 @@
 #include "vic.h"
 
 void check_context(struct editor *g, char cmd);
-char *swap_context(struct editor *g, char *p);
+int swap_context(struct editor *g, int p);
 
 #endif

@@ -13,6 +13,8 @@
  */
 #include "context.h"
 
+#include "text.h"
+
 #include <string.h>
 
 void
@@ -34,8 +36,8 @@ check_context(struct editor *g, char cmd)
 	}
 }
 
-char *
-swap_context(struct editor *g, char *p)
+int
+swap_context(struct editor *g, int p)
 {
 	/*
 	 * == Swap dot with the previous context mark ('' command) ==
@@ -46,10 +48,10 @@ swap_context(struct editor *g, char *p)
 	 * - Returns p unchanged if mark[MARK_PREV_CONTEXT] is not set or lies
 	 *   outside the current buffer bounds.
 	 */
-	char *tmp;
+	int tmp;
 
-	if (g->text <= g->mark[MARK_PREV_CONTEXT] &&
-	    g->mark[MARK_PREV_CONTEXT] <= g->end - 1) {
+	if (0 <= g->mark[MARK_PREV_CONTEXT] &&
+	    g->mark[MARK_PREV_CONTEXT] <= text_len(g) - 1) {
 		tmp = g->mark[MARK_PREV_CONTEXT];
 		g->mark[MARK_PREV_CONTEXT] = p;
 		g->mark[MARK_CONTEXT] = p = tmp;
