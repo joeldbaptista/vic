@@ -18,6 +18,7 @@
 #include "codepoint.h"
 #include "input.h"
 #include "line.h"
+#include "text.h"
 #include "textobj.h"
 
 static int
@@ -33,12 +34,12 @@ is_ascii_punct(unsigned char c)
 }
 
 int
-range_find(struct editor *g, char **start, char **stop, const struct cmd_ctx *ctx)
+range_find(struct editor *g, int *start, int *stop, const struct cmd_ctx *ctx)
 {
 	/*
 	 * == Resolve the target range for an operator command ==
 	 *
-	 * Determines start/stop buffer pointers and returns buftype
+	 * Determines start/stop buffer offsets and returns buftype
 	 * (PARTIAL, MULTI, WHOLE, or -1 on failure).  The range key c is
 	 * obtained from ctx->rg when the parser captured it, or by calling
 	 * get_motion_char() for interactive input.
@@ -55,9 +56,9 @@ range_find(struct editor *g, char **start, char **stop, const struct cmd_ctx *ct
 	 * After the motion, normalises p ≤ q and trims one codepoint for
 	 * motions that overshoot (b, ^, 0, h, …).
 	 */
-	char *p;
-	char *q;
-	char *t;
+	int p;
+	int q;
+	int t;
 	int buftype = -1;
 	int c;
 	int cmd = ctx ? (int)(unsigned char)ctx->op : 0;
@@ -114,21 +115,21 @@ range_find(struct editor *g, char **start, char **stop, const struct cmd_ctx *ct
 		if (p == g->dot)
 			buftype = -1;
 	} else if (strchr("wW", c)) {
-		char *prev;
+		int prev;
 
 		buftype = MULTI;
 		do_cmd(g, c, NULL);
 		if (g->dot > p && (!at_eof(g, g->dot) ||
-		                   (c == 'w' && is_ascii_punct((unsigned char)*g->dot))))
+		                   (c == 'w' && is_ascii_punct((unsigned char)text_char(g, g->dot)))))
 			g->dot = cp_prev(g, g->dot);
 		t = g->dot;
-		while (g->dot > p && is_ascii_space((unsigned char)*g->dot)) {
+		while (g->dot > p && is_ascii_space((unsigned char)text_char(g, g->dot))) {
 			prev = cp_prev(g, g->dot);
-			if (*g->dot == '\n')
+			if (text_char(g, g->dot) == '\n')
 				t = prev;
 			g->dot = prev;
 		}
-		if (cmd != 'c' && g->dot != t && *g->dot != '\n')
+		if (cmd != 'c' && g->dot != t && text_char(g, g->dot) != '\n')
 			g->dot = t;
 	} else if (strchr("GHL+-gjk'\r\n", c)) {
 		buftype = WHOLE;
@@ -146,7 +147,7 @@ range_find(struct editor *g, char **start, char **stop, const struct cmd_ctx *ct
 		if (g->cmd_error)
 			buftype = -1;
 	} else if (c == ' ' || c == 'l') {
-		char *m;
+		int m;
 		int moved;
 		int tmpcnt = (g->cmdcnt ?: 1);
 		buftype = PARTIAL;
@@ -176,7 +177,7 @@ range_find(struct editor *g, char **start, char **stop, const struct cmd_ctx *ct
 			q = cp_prev(g, q);
 		} else if (strchr("{}", c)) {
 			buftype =
-			    (p == begin_line(g, p) && (*q == '\n' || at_eof(g, q)))
+			    (p == begin_line(g, p) && (text_char(g, q) == '\n' || at_eof(g, q)))
 			        ? WHOLE
 			        : MULTI;
 			if (!at_eof(g, q)) {

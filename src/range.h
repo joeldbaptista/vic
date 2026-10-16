@@ -3,6 +3,6 @@
 
 #include "vic.h"
 
-int range_find(struct editor *g, char **start, char **stop, const struct cmd_ctx *ctx);
+int range_find(struct editor *g, int *start, int *stop, const struct cmd_ctx *ctx);
 
 #endif
