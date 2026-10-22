@@ -543,6 +543,7 @@ makefiles, which normally carry no extension.
 | Terraform| `.tf` `.tfvars` `.hcl`                  |
 | Make     | `Makefile` `GNUmakefile` `.mk` `.inc`   |
 | awk      | `.awk` `.gawk`                          |
+| Rust     | `.rs`                                   |
 
 Highlighted elements vary by language but include:
 - **Keywords** — language reserved words
@@ -555,6 +556,8 @@ Highlighted elements vary by language but include:
 - **Block types, named values and `${...}` interpolation** — (Terraform)
 - **Targets, directives, variable references and recipe prefixes** — (make)
 - **Field references and regex literals** — `$1`, `/re/` (awk)
+- **Attributes** — `#[derive(Debug)]` (Rust); a lifetime such as `'a` is left
+  uncoloured, so it is not mistaken for a character literal
 
 ---
 

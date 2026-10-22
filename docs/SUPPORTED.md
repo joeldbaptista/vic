@@ -2,7 +2,7 @@
 
 This file defines the supported behavior contract for this project.
 
-Last updated: 2026-10-04.
+Last updated: 2026-10-22.
 
 ## Scope of support
 
@@ -142,6 +142,24 @@ Last updated: 2026-10-04.
   only when the same line holds the closing `/`; otherwise the `/` is a division. The
   built-in variables (`NR`, `NF`, `FS`, ...) are ordinary names to awk, so they are not
   highlighted.
+- Rust files (`.rs`): keywords (`fn`, `let`, `impl`, `match`, `async`, `unsafe`, ...), the
+  words the language reserves (`become`, `yield`, ...), the primitive type names (`i32`,
+  `u8`, `f64`, `bool`, `char`, `str`, ...), which the language builds in, attributes
+  (`#[derive(Debug)]`, `#![allow(...)]`), `//` line comments (so also the doc forms `///`
+  and `//!`), block comments spanning lines, string literals including the `b` and `r`
+  prefixed forms, character literals (`'x'`, `'\n'`, `b'0'`), and numbers (decimal, `0x`
+  hex, `0o` octal, `0b` binary, float with exponent, `_` digit separators, and type
+  suffixes such as `1u8` and `2.0f32`). A `'` opens a character literal only when one
+  character and its closing quote follow it, so a lifetime or a loop label (`'a`,
+  `'static`, `'outer`) stays uncoloured rather than opening a literal that runs to the
+  end of the line. A string literal may span lines, which Rust allows. Two constructs
+  are approximated, in both cases leaving text uncoloured rather than colouring it
+  wrongly: a nested block comment closes at the first `*/`, so the text from there to
+  the outer close is scanned as code; and a hashed raw string (`r#"..."#`) is scanned as
+  an ordinary string, so its hashes colour as an attribute sigil and a quote inside the
+  body ends the string early. Library names are not keywords to Rust, so `Option`,
+  `Result`, `Some`, `None`, `Ok`, `Err`, `Vec` and `String` are ordinary names and are
+  not highlighted.
 - Dockerfiles: instructions (`FROM`, `RUN`, `COPY`, ...) at the head of a logical line,
   variable expansions (`$VAR`, `${VAR}`), `#` comments, quoted strings, numbers. A line
   continued with a trailing backslash does not start a new instruction on the next line.
@@ -149,8 +167,8 @@ Last updated: 2026-10-04.
   not by colour.
 - Opening a file also re-seeds `tabstop` from the file type, overriding the `config.h`
   default and any earlier `:set tabstop=`. Terraform and YAML use 2; awk, Dockerfile,
-  Markdown, Python, shell and SQL use 4; C, C++ and makefiles use 8; every other file
-  type uses the `config.h` default.
+  Markdown, Python, Rust, shell and SQL use 4; C, C++ and makefiles use 8; every other
+  file type uses the `config.h` default.
 
 ## Persistent undo
 

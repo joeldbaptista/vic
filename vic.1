@@ -534,6 +534,7 @@ YAML	\fB.yaml\fR \fB.yml\fR
 Terraform	\fB.tf\fR \fB.tfvars\fR \fB.hcl\fR
 Make	\fBMakefile\fR \fBGNUmakefile\fR \fB.mk\fR \fB.inc\fR
 awk	\fB.awk\fR \fB.gawk\fR
+Rust	\fB.rs\fR
 .TE
 .PP
 A Dockerfile or makefile base name also matches with a dotted suffix, as in
@@ -545,7 +546,8 @@ keys, anchors, aliases and block scalars (YAML), block types, named
 values and
 .B ${...}
 interpolation (Terraform), targets, directives, variable references and
-recipe prefixes (make), and field references and regex literals (awk).  A Terraform here-document is not tracked across
+recipe prefixes (make), field references and regex literals (awk), and
+attributes (Rust).  A Terraform here-document is not tracked across
 lines, so its body is coloured as though it were HCL code.  A make recipe is
 scanned as makefile text rather than as shell, since the makefile chooses
 its own shell.  An awk
@@ -553,7 +555,17 @@ its own shell.  An awk
 opens a regex literal only where an operand is expected and only when the
 same line holds the closing
 .BR / ;
-otherwise it is a division.
+otherwise it is a division.  A Rust
+.B '
+opens a character literal only when one character and its closing quote
+follow it, so a lifetime or a loop label
+.RB ( 'a ,
+.BR 'static )
+is left uncoloured; a nested block comment closes at the first
+.BR */ ,
+and a hashed raw string
+.RB ( r#"..."# )
+is scanned as an ordinary string.
 .SH STARTUP CONFIGURATION
 On startup,
 .B vic
