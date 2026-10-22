@@ -2,16 +2,19 @@
  * color_generic.h - table-driven syntax colorizer engine.
  *
  * Shared by color_c.c, color_py.c, color_sh.c, color_sql.c, color_docker.c,
- * color_tf.c, and color_awk.c.  Each of those files owns only its keyword table(s) and a
- * static struct lang_spec describing its syntax; colorize_generic() does the
- * actual scanning.
+ * color_tf.c, color_awk.c, and color_rust.c.  Each of those files owns only
+ * its keyword table(s) and a static struct lang_spec describing its syntax;
+ * colorize_generic() does the actual scanning.
  *
  * Cross-line state is a plain int, same as the colorize_fn contract in
  * color.h.  Each language's state values are only ever fed back into its
- * own colorizer, so the numeric space is reused across mechanisms below -
- * a given language only ever exercises one of them (colorize_generic
- * dispatches on which lang_spec fields are populated, not on the raw
- * state value alone, so this is unambiguous per language).
+ * own colorizer, so the numeric space is reused across the comment and
+ * continuation mechanisms below - a given language only ever exercises one
+ * of them (colorize_generic dispatches on which lang_spec fields are
+ * populated, not on the raw state value alone, so this is unambiguous per
+ * language).  String states are the exception: they start above the other
+ * values, because a language may have both block comments and strings that
+ * span lines (Rust does), and the two states must then stay distinct.
  */
 #ifndef COLOR_GENERIC_H
 #define COLOR_GENERIC_H
@@ -22,7 +25,7 @@ enum {
 	CS_BLOCK_CMT_STAR = 2,  /* inside a block comment, last byte was close[0] */
 	CS_BOL_CONT = 3,         /* bol_char line, continued via trailing backslash */
 	CS_LINE_CONT = 4,         /* keywords_bol language: previous line ended with a backslash */
-	CS_STRING_BASE = 1,       /* + index into lang_spec.strings[]: resuming that string */
+	CS_STRING_BASE = 8,       /* + index into lang_spec.strings[]: resuming that string */
 };
 
 struct num_spec {
@@ -33,6 +36,7 @@ struct num_spec {
 	int complex_suffix;          /* trailing j/J marks a complex literal */
 	const char *int_suffixes;     /* chars allowed to repeat after the digits, or NULL */
 	int word_boundary_guard;       /* only emit ATTR_NUMBER if not followed by an ident char */
+	int dot_needs_digit;            /* '.' continues the literal only when a digit follows */
 };
 
 struct str_spec {
@@ -43,6 +47,7 @@ struct str_spec {
 	int cross_line;           /* unterminated simple form persists state to the next line */
 	int prefixable;             /* allow b/f/r/u (any case) prefix letters before the quote */
 	int expand_sigil;             /* recognize lang_spec.sigil_char inside the string body */
+	int char_literal;              /* open only when the quote starts a one-character literal */
 };
 
 struct lang_spec {
@@ -63,6 +68,8 @@ struct lang_spec {
 	char bol_char;        /* e.g. '#'; 0 = none. Only fires as the first non-blank byte on the line */
 	int bol_continuation;   /* trailing '\' keeps bol coloring and state alive across lines */
 	int regex_slash;          /* '/' where an operand is expected opens a /regex/ -> ATTR_STRING */
+	int decorator_bracket;      /* a decorator may carry a '!' and a [...] list, as in #![...] */
+	char label_char;              /* e.g. '\''; 0 = none. quote + ident that opens no literal -> ATTR_NORMAL */
 };
 
 /*

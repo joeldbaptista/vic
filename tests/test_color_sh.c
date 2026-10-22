@@ -1,9 +1,9 @@
 /*
  * test_color_sh.c - unit tests for the shell syntax colorizer.
  *
- * Cross-line states (mirrors color_sh.c):
- *   0  SH_NORMAL
- *   1  SH_DQUOTE  (inside a double-quoted string continuing across lines)
+ * Cross-line states (see color_generic.h):
+ *   0  CS_NORMAL
+ *   8  CS_STRING_BASE + 0  (inside a double-quoted string continuing across lines)
  */
 #include "color_testutil.h"
 
@@ -100,7 +100,7 @@ test_double_quoted(void)
     /* backslash escape inside (6 chars: " a \ n b ") */
     st = CHECK_COLOR(SH, 0, "\"a\\nb\"",        "SSSSSS");  CHECK(st == 0);
     /* escaped quote at end of line — the \" must be colored STRING, not NORMAL */
-    st = CHECK_COLOR(SH, 0, "\"a\\\"",          "SSSS");    CHECK(st == 1);
+    st = CHECK_COLOR(SH, 0, "\"a\\\"",          "SSSS");    CHECK(st == 8);
 }
 
 static void
@@ -108,14 +108,14 @@ test_double_quoted_multiline(void)
 {
     int st;
 
-    /* open double-quoted without close: state → SH_DQUOTE = 1 */
-    st = CHECK_COLOR(SH, 0, "\"open",       "SSSSS");  CHECK(st == 1);
+    /* open double-quoted without close: state → CS_STRING_BASE + 0 = 8 */
+    st = CHECK_COLOR(SH, 0, "\"open",       "SSSSS");  CHECK(st == 8);
     /* continuation: variable inside cross-line string */
-    st = CHECK_COLOR(SH, 1, "$VAR",         "PPPP");   CHECK(st == 1);
+    st = CHECK_COLOR(SH, 8, "$VAR",         "PPPP");   CHECK(st == 8);
     /* plain continuation */
-    st = CHECK_COLOR(SH, 1, "more text",    "SSSSSSSSS"); CHECK(st == 1);
+    st = CHECK_COLOR(SH, 8, "more text",    "SSSSSSSSS"); CHECK(st == 8);
     /* close */
-    st = CHECK_COLOR(SH, 1, "close\"",      "SSSSSS");    CHECK(st == 0);
+    st = CHECK_COLOR(SH, 8, "close\"",      "SSSSSS");    CHECK(st == 0);
 }
 
 /* ---- numbers ------------------------------------------------------------ */

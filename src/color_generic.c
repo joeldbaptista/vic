@@ -5,9 +5,9 @@
  * language colorizer: keyword lookup, identifier/number scanning, block
  * and line comments, and quoted strings (including triple-quoted and
  * cross-line variants).  Per-language quirks - C preprocessor lines,
- * Python decorators, shell variable expansion, awk regex literals - are
- * expressed as data in struct lang_spec (see color_generic.h) rather than
- * code here.
+ * Python decorators, shell variable expansion, awk regex literals, Rust
+ * attributes and lifetimes - are expressed as data in struct lang_spec
+ * (see color_generic.h) rather than code here.
  */
 #include "color_generic.h"
 #include "color.h"
@@ -150,18 +150,33 @@ scan_block_comment(int state, const char *line, int len, int i, char *attrs,
 }
 
 static int
-scan_sigil(const char *line, int len, int i, char *attrs)
+scan_sigil(const char *line, int len, int i, char *attrs, int bracket)
 {
 	/*
 	 * == Scan a sigil token: bare word, {...}, or (...) ==
 	 *
 	 * line[i] is the sigil byte itself.  Colors the whole token
 	 * ATTR_PREPROC.  Returns the index just past it.
+	 *
+	 * With bracket set, the token may also carry a leading '!' and a
+	 * [...] list, which is the shape of a Rust attribute (#[derive(..)],
+	 * #![allow(..)]).  The list ends at the first ']', so a ']' nested
+	 * inside a string in the list would cut it short.
 	 */
 	int start = i++;
+	char close = 0;
 
-	if (i < len && (line[i] == '{' || line[i] == '(')) {
-		char close = (line[i] == '{') ? '}' : ')';
+	if (bracket && i < len && line[i] == '!')
+		i++;
+	if (i < len) {
+		if (line[i] == '{')
+			close = '}';
+		else if (line[i] == '(')
+			close = ')';
+		else if (bracket && line[i] == '[')
+			close = ']';
+	}
+	if (close) {
 		i++;
 		while (i < len && line[i] != close)
 			i++;
@@ -214,7 +229,9 @@ scan_number(const char *line, int len, int i, const struct num_spec *num)
 		while (i < len && (isdigit((unsigned char)line[i]) ||
 		                    (num->underscore_sep && line[i] == '_')))
 			i++;
-		if (i < len && line[i] == '.') {
+		if (i < len && line[i] == '.' &&
+		    (!num->dot_needs_digit ||
+		     (i + 1 < len && isdigit((unsigned char)line[i + 1])))) {
 			i++;
 			while (i < len && (isdigit((unsigned char)line[i]) ||
 			                    (num->underscore_sep && line[i] == '_')))
@@ -339,7 +356,7 @@ scan_string_simple(int spec_idx, const struct str_spec *ss,
 		}
 		if (ss->expand_sigil && spec->sigil_char &&
 		    line[i] == spec->sigil_char) {
-			i = scan_sigil(line, len, i, attrs);
+			i = scan_sigil(line, len, i, attrs, 0);
 			continue;
 		}
 		fill_attrs(attrs, i, i + 1, ATTR_STRING);
@@ -389,6 +406,53 @@ scan_string_open(int spec_idx, const struct lang_spec *spec, const char *line,
 }
 
 static int
+utf8_seq_len(unsigned char c)
+{
+	/*
+	 * == Byte length of the UTF-8 sequence that c leads ==
+	 *
+	 * A continuation byte or an invalid lead byte counts as one byte, so
+	 * the caller always advances.
+	 */
+	if (c >= 0xf0)
+		return 4;
+	if (c >= 0xe0)
+		return 3;
+	if (c >= 0xc0)
+		return 2;
+	return 1;
+}
+
+static int
+is_char_literal(const char *line, int len, int i)
+{
+	/*
+	 * == True if a one-character literal opens at line[i] ==
+	 *
+	 * line[i] is the quote.  Two shapes count: an escape sequence
+	 * ('\n', '\x41', '\u{1F600}'), which is recognized by the
+	 * backslash and bounded by the closing quote on the same line; and a
+	 * single character, whose closing quote must follow it immediately,
+	 * one byte later for ASCII and up to four for UTF-8.  Everything else
+	 * is a Rust lifetime or loop label ('a, 'static, 'outer), which the
+	 * caller leaves to lang_spec.label_char.
+	 */
+	int j, n;
+
+	if (i + 1 >= len)
+		return 0;
+	if (line[i + 1] == '\\') {
+		for (j = i + 2; j < len && j <= i + 12; j++) {
+			if (line[j] == '\'')
+				return 1;
+		}
+		return 0;
+	}
+	n = utf8_seq_len((unsigned char)line[i + 1]);
+	return i + 1 + n < len && line[i + 1 + n] == '\'';
+}
+
+static int
 try_open_string(const char *line, int len, int i, const struct lang_spec *spec,
                  int *out_spec_idx)
 {
@@ -399,13 +463,18 @@ try_open_string(const char *line, int len, int i, const struct lang_spec *spec,
 	 * start an identifier, peeks ahead through b/f/r/u prefix letters
 	 * for a delimiter belonging to a prefixable spec.  The peek never
 	 * mutates state, so a failed peek leaves the caller free to fall
-	 * back to plain identifier scanning from i.  Returns the index of
+	 * back to plain identifier scanning from i.  A char_literal spec is
+	 * skipped unless a one-character literal really opens there, which is
+	 * how a Rust lifetime is told from a character.  Returns the index of
 	 * the delimiter byte (spec index via *out_spec_idx), or -1.
 	 */
 	int j, k;
 
 	for (k = 0; spec->strings[k].open; k++) {
 		if (line[i] == spec->strings[k].open) {
+			if (spec->strings[k].char_literal &&
+			    !is_char_literal(line, len, i))
+				continue;
 			*out_spec_idx = k;
 			return i;
 		}
@@ -427,6 +496,9 @@ try_open_string(const char *line, int len, int i, const struct lang_spec *spec,
 		return -1;
 	for (k = 0; spec->strings[k].open; k++) {
 		if (spec->strings[k].prefixable && line[j] == spec->strings[k].open) {
+			if (spec->strings[k].char_literal &&
+			    !is_char_literal(line, len, j))
+				continue;
 			*out_spec_idx = k;
 			return j;
 		}
@@ -532,13 +604,14 @@ normal:
 		}
 
 		if (spec->decorator_char && c == (unsigned char)spec->decorator_char) {
-			i = scan_sigil(line, len, i, attrs);
+			i = scan_sigil(line, len, i, attrs,
+			                spec->decorator_bracket);
 			operand = 0;
 			continue;
 		}
 
 		if (spec->sigil_char && c == (unsigned char)spec->sigil_char) {
-			i = scan_sigil(line, len, i, attrs);
+			i = scan_sigil(line, len, i, attrs, 0);
 			operand = 1;
 			continue;
 		}
@@ -562,6 +635,20 @@ normal:
 			                      quote_pos, attrs, &new_state);
 			if (new_state != CS_NORMAL)
 				return new_state;
+			operand = 1;
+			continue;
+		}
+
+		/*
+		 * A label_char quote that opened no literal above introduces a
+		 * lifetime or a loop label, so the quote and the name after it
+		 * stay ATTR_NORMAL and are stepped over as one token - that
+		 * keeps a name such as 'static out of the keyword lookup.
+		 */
+		if (spec->label_char && c == (unsigned char)spec->label_char) {
+			i++;
+			while (i < len && is_ident((unsigned char)line[i]))
+				i++;
 			operand = 1;
 			continue;
 		}
