@@ -43,8 +43,8 @@ static const char *const sh_keywords[] = {
 /*
  * "..." spans lines when unterminated and recognizes $-expansion inside;
  * '...' is a literal with no escapes and no expansion.  "..." must come
- * first: its cross-line resume state (CS_STRING_BASE + 0) is what the
- * test suite / callers know as SH_DQUOTE.
+ * first: its cross-line resume state is then CS_STRING_BASE + 0, the value
+ * the test suite asserts.
  */
 static const struct str_spec sh_strings[] = {
     {.open = '"', .escape = 1, .cross_line = 1, .expand_sigil = 1},

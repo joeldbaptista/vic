@@ -15,8 +15,11 @@
  *   Attributes    — #[...] and #![...]
  *   Line comments — // ..., and so also the doc forms /// and //!
  *   Block comments  (slash-star ... star-slash), spanning lines
- *   String literals "...", b"...", r"..." — these may span lines
+ *   String literals "...", b"...", and the raw forms r"...", br"..." and
+ *                   r#"..."# — these may span lines
  *   Character literals '...' and b'...'
+ *   Raw identifiers r#type, r#match — the name is not a keyword to Rust,
+ *                   so the whole token is left uncoloured
  *
  * Lifetimes and loop labels ('a, 'static, 'outer) are left uncoloured: a
  * quote opens a character literal only when one character and its closing
@@ -25,17 +28,23 @@
  * Library names are not keywords to Rust, so Option, Result, Some, None,
  * Ok, Err, Vec and String are coloured as the ordinary names they are.
  *
- * Two constructs are approximated, in both cases erring towards leaving
- * text uncoloured:
+ * Three constructs are approximated:
  *   - A nested block comment closes at the first star-slash, so the text
- *     from there to the outer close is scanned as code.
- *   - A hashed raw string (r#"..."#) is scanned as an ordinary string: the
- *     hashes colour as an attribute sigil, and a quote inside the body
- *     ends the string early.
+ *     from there to the outer close is scanned as code and is coloured as
+ *     code, and a quote left unpaired in it opens a string that carries on
+ *     to the following lines.
+ *   - An attribute is scanned to the end of its line only, so an attribute
+ *     whose list is split over lines, as rustfmt writes a long derive list,
+ *     keeps its colour on the first line while the rest of the list is
+ *     scanned as code.
+ *   - A raw string closes only when its quote and all of its hashes sit on
+ *     the same line, so a close delimiter split over a line boundary
+ *     leaves the string open.
  *
  * Cross-line state: see color_generic.h.  Block comments use
- * CS_BLOCK_CMT / CS_BLOCK_CMT_STAR, and a "..." left open at the end of a
- * line uses CS_STRING_BASE.
+ * CS_BLOCK_CMT / CS_BLOCK_CMT_STAR, a "..." left open at the end of a line
+ * uses CS_STRING_BASE, and a raw string left open uses CS_RAW_BASE plus
+ * the number of hashes its open delimiter carried.
  */
 #include "color.h"
 #include "color_generic.h"
@@ -122,12 +131,15 @@ static const char *const rust_keywords[] = {
 
 /*
  * "..." is backslash-escaped and may span lines, which is why cross_line
- * is set; the prefix letters cover b"..." and r"...".  '...' is a
- * character literal, so char_literal gates it: without that gate every
- * lifetime would open a string that runs to the end of the line.
+ * is set; the prefix letters cover b"...", r"..." and br"...".  The raw
+ * flag, with raw_prefix and raw_hash in the spec below, gives the r forms
+ * their own scan: no backslash escapes, and a close delimiter padded with
+ * as many hashes as the open delimiter carried.  '...' is a character
+ * literal, so char_literal gates it: without that gate every lifetime
+ * would open a string that runs to the end of the line.
  */
 static const struct str_spec rust_strings[] = {
-    {.open = '"', .escape = 1, .cross_line = 1, .prefixable = 1},
+    {.open = '"', .escape = 1, .cross_line = 1, .prefixable = 1, .raw = 1},
     {.open = '\'', .escape = 1, .prefixable = 1, .char_literal = 1},
     {0},
 };
@@ -152,6 +164,13 @@ static const struct lang_spec rust_spec = {
     .decorator_char = '#',
     .decorator_bracket = 1,
     .label_char = '\'',
+    /*
+     * The r prefix and its hashes make a raw literal: r"...", br"..." and
+     * r#"..."#.  The same '#' also ends a raw identifier (r#type), which
+     * the engine tells from a raw string by what follows the hash.
+     */
+    .raw_prefix = 'r',
+    .raw_hash = '#',
 };
 
 static int

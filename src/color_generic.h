@@ -15,6 +15,8 @@
  * language).  String states are the exception: they start above the other
  * values, because a language may have both block comments and strings that
  * span lines (Rust does), and the two states must then stay distinct.
+ * CS_RAW_BASE caps the string range at eight specs, and the raw range above
+ * it is open-ended, since it counts the hashes of the open delimiter.
  */
 #ifndef COLOR_GENERIC_H
 #define COLOR_GENERIC_H
@@ -26,6 +28,7 @@ enum {
 	CS_BOL_CONT = 3,         /* bol_char line, continued via trailing backslash */
 	CS_LINE_CONT = 4,         /* keywords_bol language: previous line ended with a backslash */
 	CS_STRING_BASE = 8,       /* + index into lang_spec.strings[]: resuming that string */
+	CS_RAW_BASE = 16,          /* + hash count: resuming a raw string (see .raw below) */
 };
 
 struct num_spec {
@@ -48,6 +51,7 @@ struct str_spec {
 	int prefixable;             /* allow b/f/r/u (any case) prefix letters before the quote */
 	int expand_sigil;             /* recognize lang_spec.sigil_char inside the string body */
 	int char_literal;              /* open only when the quote starts a one-character literal */
+	int raw;                        /* lang_spec.raw_prefix before the delimiter opens a raw form */
 };
 
 struct lang_spec {
@@ -70,6 +74,8 @@ struct lang_spec {
 	int regex_slash;          /* '/' where an operand is expected opens a /regex/ -> ATTR_STRING */
 	int decorator_bracket;      /* a decorator may carry a '!' and a [...] list, as in #![...] */
 	char label_char;              /* e.g. '\''; 0 = none. quote + ident that opens no literal -> ATTR_NORMAL */
+	char raw_prefix;                /* e.g. 'r'; 0 = none. prefix letter opening a .raw string */
+	char raw_hash;                   /* e.g. '#'; 0 = none. pads a raw delimiter, as in r#"..."# */
 };
 
 /*
