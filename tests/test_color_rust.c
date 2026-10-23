@@ -7,6 +7,8 @@
  *   1  CS_BLOCK_CMT
  *   2  CS_BLOCK_CMT_STAR
  *   8  CS_STRING_BASE + 0 (a "..." left open at the end of the line)
+ *  16  CS_RAW_BASE + 0    (an r"..." left open at the end of the line)
+ *  17  CS_RAW_BASE + 1    (an r#"..."# left open at the end of the line)
  */
 #include "color_testutil.h"
 
@@ -55,6 +57,10 @@ test_strings(void)
     /* the b and r prefixes belong to the literal */
     st = CHECK_COLOR(RUST, 0, "b\"bytes\"",         "SSSSSSSS");           CHECK(st == 0);
     st = CHECK_COLOR(RUST, 0, "r\"a\\b\"",          "SSSSSS");             CHECK(st == 0);
+    /* a raw string has no escapes, so a trailing backslash still closes it */
+    st = CHECK_COLOR(RUST, 0, "let p = r\"C:\\d\\\";",
+                              "KKK.....SSSSSSSS.");                        CHECK(st == 0);
+    st = CHECK_COLOR(RUST, 0, "br\"b\\\" + 1",      "SSSSSS...N");         CHECK(st == 0);
     /* '//' and '#' inside a string are part of it */
     st = CHECK_COLOR(RUST, 0, "let u = \"//#\";",   "KKK.....SSSSS.");     CHECK(st == 0);
     /* a Rust string may span lines, so state 8 carries it over */
@@ -62,11 +68,19 @@ test_strings(void)
     st = CHECK_COLOR(RUST, 8, "middle",             "SSSSSS");             CHECK(st == 8);
     st = CHECK_COLOR(RUST, 8, "last\";",            "SSSSS.");             CHECK(st == 0);
     /*
-     * A hashed raw string is approximated: the hashes colour as an
-     * attribute sigil, and the quote inside the body ends the string.
+     * A hashed raw string closes only at a quote followed by as many
+     * hashes as it opened with, so the quotes in its body belong to it.
      */
     st = CHECK_COLOR(RUST, 0, "let s = r#\"raw \"q\" t\"#;",
-                              "KKK......PSSSSSS.SSSSP.");                  CHECK(st == 0);
+                              "KKK.....SSSSSSSSSSSSSS.");                  CHECK(st == 0);
+    st = CHECK_COLOR(RUST, 0, "r##\"a\"# b\"##",     "SSSSSSSSSSSS");       CHECK(st == 0);
+    /* a raw string spans lines, and the state counts its hashes */
+    st = CHECK_COLOR(RUST, 0, "let q = r#\"select",   "KKK.....SSSSSSSSS"); CHECK(st == 17);
+    st = CHECK_COLOR(RUST, 17, "  from t \"x\"",      "SSSSSSSSSSSS");      CHECK(st == 17);
+    st = CHECK_COLOR(RUST, 17, "\"#;",                "SS.");              CHECK(st == 0);
+    /* an unhashed raw string carries state 16, which is its own */
+    st = CHECK_COLOR(RUST, 0, "let r = r\"open",      "KKK.....SSSSSS");    CHECK(st == 16);
+    st = CHECK_COLOR(RUST, 16, "shut\";",             "SSSSS.");            CHECK(st == 0);
 }
 
 /* ---- character literals, lifetimes and labels --------------------------- */
@@ -80,6 +94,9 @@ test_chars_and_lifetimes(void)
     st = CHECK_COLOR(RUST, 0, "'\\n'",              "SSSS");               CHECK(st == 0);
     st = CHECK_COLOR(RUST, 0, "'\\''",              "SSSS");               CHECK(st == 0);
     st = CHECK_COLOR(RUST, 0, "b'0'",               "SSSS");               CHECK(st == 0);
+    /* a non-ASCII literal, whose one character is measured by the UTF-8 stepper */
+    st = CHECK_COLOR(RUST, 0, "'\303\251'",         "SSSS");               CHECK(st == 0);
+    st = CHECK_COLOR(RUST, 0, "'\360\237\230\200'", "SSSSSS");             CHECK(st == 0);
     st = CHECK_COLOR(RUST, 0, "if c == 'a' && d == 'b' {",
                               "KK......SSS.........SSS..");                CHECK(st == 0);
     /* a lifetime opens no literal, so it does not run to end of line */
@@ -132,6 +149,25 @@ test_attributes(void)
     st = CHECK_COLOR(RUST, 0, "    #[inline]",      "....PPPPPPPPP");      CHECK(st == 0);
     /* code after the attribute is still scanned */
     st = CHECK_COLOR(RUST, 0, "#[test] fn f() {}",  "PPPPPPP.KK.......");  CHECK(st == 0);
+    /* a ']' inside a quoted argument does not end the list */
+    st = CHECK_COLOR(RUST, 0, "#[doc = \"see [Foo]\"]",
+                              "PPPPPPPPPPPPPPPPPPPP");                     CHECK(st == 0);
+    st = CHECK_COLOR(RUST, 0, "#[error(\"[{0}] bad\")]",
+                              "PPPPPPPPPPPPPPPPPPPPP");                    CHECK(st == 0);
+    /* a '#' that opens no list is not an attribute, so it stays plain */
+    st = CHECK_COLOR(RUST, 0, "quote! { #name }",   "................");   CHECK(st == 0);
+    /*
+     * A raw identifier is a name, not an attribute, and its keyword-like
+     * part is not a keyword either.
+     */
+    st = CHECK_COLOR(RUST, 0, "pub r#type: String,", "KKK................"); CHECK(st == 0);
+    st = CHECK_COLOR(RUST, 0, "let r#match = 1;",   "KKK...........N.");   CHECK(st == 0);
+    /*
+     * An attribute split over lines keeps its colour on the first line
+     * only, and the rest of the list is scanned as code.
+     */
+    st = CHECK_COLOR(RUST, 0, "#[derive(",          "PPPPPPPPP");          CHECK(st == 0);
+    st = CHECK_COLOR(RUST, 0, ")]",                 "..");                 CHECK(st == 0);
 }
 
 /* ---- numbers ------------------------------------------------------------ */
