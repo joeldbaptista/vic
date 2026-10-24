@@ -1,10 +1,10 @@
 /*
  * test_color_py.c - unit tests for the Python syntax colorizer.
  *
- * Cross-line states (mirrors color_py.c):
- *   0  PY_NORMAL
- *   1  PY_TRIPLE_DQ  (inside """)
- *   2  PY_TRIPLE_SQ  (inside ''')
+ * Cross-line states (see color_generic.h):
+ *   0  CS_NORMAL
+ *   8  CS_STRING_BASE + 0  (inside """)
+ *   9  CS_STRING_BASE + 1  (inside ''')
  */
 #include "color_testutil.h"
 
@@ -98,14 +98,14 @@ test_triple_dq(void)
 {
     int st;
 
-    /* open triple-quoted string: state → PY_TRIPLE_DQ = 1 */
-    st = CHECK_COLOR(PY, 0, "x = \"\"\"start", "....SSSSSSSS"); CHECK(st == 1);
+    /* open triple-quoted string: state → CS_STRING_BASE + 0 = 8 */
+    st = CHECK_COLOR(PY, 0, "x = \"\"\"start", "....SSSSSSSS"); CHECK(st == 8);
     /* continuation line — scan_triple_close finds no """, entire line is S */
-    st = CHECK_COLOR(PY, 1, "middle line",     "SSSSSSSSSSS"); CHECK(st == 1);
+    st = CHECK_COLOR(PY, 8, "middle line",     "SSSSSSSSSSS"); CHECK(st == 8);
     /* close — everything up to and including """ is string */
-    st = CHECK_COLOR(PY, 1, "end\"\"\"",       "SSSSSS");      CHECK(st == 0);
+    st = CHECK_COLOR(PY, 8, "end\"\"\"",       "SSSSSS");      CHECK(st == 0);
     /* close with trailing code */
-    st = CHECK_COLOR(PY, 1, "end\"\"\" + x",   "SSSSSS...."); CHECK(st == 0);
+    st = CHECK_COLOR(PY, 8, "end\"\"\" + x",   "SSSSSS...."); CHECK(st == 0);
 
     /* triple on single line: open and close on same line */
     st = CHECK_COLOR(PY, 0, "\"\"\"inline\"\"\"", "SSSSSSSSSSSS"); CHECK(st == 0);
@@ -116,10 +116,10 @@ test_triple_sq(void)
 {
     int st;
 
-    /* open triple single-quoted string: state → PY_TRIPLE_SQ = 2 */
-    st = CHECK_COLOR(PY, 0, "'''start", "SSSSSSSS"); CHECK(st == 2);
-    st = CHECK_COLOR(PY, 2, "content",  "SSSSSSS"); CHECK(st == 2);
-    st = CHECK_COLOR(PY, 2, "end'''",   "SSSSSS");  CHECK(st == 0);
+    /* open triple single-quoted string: state → CS_STRING_BASE + 1 = 9 */
+    st = CHECK_COLOR(PY, 0, "'''start", "SSSSSSSS"); CHECK(st == 9);
+    st = CHECK_COLOR(PY, 9, "content",  "SSSSSSS"); CHECK(st == 9);
+    st = CHECK_COLOR(PY, 9, "end'''",   "SSSSSS");  CHECK(st == 0);
 }
 
 /* ---- decorators --------------------------------------------------------- */

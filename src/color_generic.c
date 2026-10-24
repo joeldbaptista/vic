@@ -5,12 +5,13 @@
  * language colorizer: keyword lookup, identifier/number scanning, block
  * and line comments, and quoted strings (including triple-quoted and
  * cross-line variants).  Per-language quirks - C preprocessor lines,
- * Python decorators, shell variable expansion, awk regex literals - are
- * expressed as data in struct lang_spec (see color_generic.h) rather than
- * code here.
+ * Python decorators, shell variable expansion, awk regex literals, Rust
+ * attributes and lifetimes - are expressed as data in struct lang_spec
+ * (see color_generic.h) rather than code here.
  */
 #include "color_generic.h"
 #include "color.h"
+#include "utf8.h"
 #include <ctype.h>
 #include <string.h>
 
@@ -150,21 +151,55 @@ scan_block_comment(int state, const char *line, int len, int i, char *attrs,
 }
 
 static int
-scan_sigil(const char *line, int len, int i, char *attrs)
+scan_sigil(const char *line, int len, int i, char *attrs, int bracket)
 {
 	/*
 	 * == Scan a sigil token: bare word, {...}, or (...) ==
 	 *
 	 * line[i] is the sigil byte itself.  Colors the whole token
 	 * ATTR_PREPROC.  Returns the index just past it.
+	 *
+	 * With bracket set the token is a Rust attribute instead, which is a
+	 * '[...]' list with an optional '!' before it (#[derive(..)],
+	 * #![allow(..)]).  Nothing else is an attribute, so a sigil byte that
+	 * no such list follows is left uncoloured and the index comes back
+	 * unchanged - that keeps the '#' of a raw identifier or of a macro
+	 * interpolation from reading as an attribute.  A '"' inside the list
+	 * is skipped over, since the ']' that ends the list is the first one
+	 * outside a quoted argument, as in #[doc = "see [Foo]"].
+	 *
+	 * The list ends at the end of the line when it holds no ']', because
+	 * no state is carried across lines: the rest of an attribute split
+	 * over several lines is scanned as ordinary code.
 	 */
 	int start = i++;
+	char close = 0;
 
-	if (i < len && (line[i] == '{' || line[i] == '(')) {
-		char close = (line[i] == '{') ? '}' : ')';
-		i++;
-		while (i < len && line[i] != close)
+	if (bracket) {
+		if (i < len && line[i] == '!')
 			i++;
+		if (i >= len || line[i] != '[')
+			return start;
+		close = ']';
+	} else if (i < len) {
+		if (line[i] == '{')
+			close = '}';
+		else if (line[i] == '(')
+			close = ')';
+	}
+	if (close) {
+		i++;
+		while (i < len && line[i] != close) {
+			if (bracket && line[i] == '"') {
+				for (i++; i < len && line[i] != '"'; i++) {
+					if (line[i] == '\\' && i + 1 < len)
+						i++;
+				}
+				if (i >= len)
+					break;
+			}
+			i++;
+		}
 		if (i < len)
 			i++;
 	} else {
@@ -214,7 +249,9 @@ scan_number(const char *line, int len, int i, const struct num_spec *num)
 		while (i < len && (isdigit((unsigned char)line[i]) ||
 		                    (num->underscore_sep && line[i] == '_')))
 			i++;
-		if (i < len && line[i] == '.') {
+		if (i < len && line[i] == '.' &&
+		    (!num->dot_needs_digit ||
+		     (i + 1 < len && isdigit((unsigned char)line[i + 1])))) {
 			i++;
 			while (i < len && (isdigit((unsigned char)line[i]) ||
 			                    (num->underscore_sep && line[i] == '_')))
@@ -339,7 +376,7 @@ scan_string_simple(int spec_idx, const struct str_spec *ss,
 		}
 		if (ss->expand_sigil && spec->sigil_char &&
 		    line[i] == spec->sigil_char) {
-			i = scan_sigil(line, len, i, attrs);
+			i = scan_sigil(line, len, i, attrs, 0);
 			continue;
 		}
 		fill_attrs(attrs, i, i + 1, ATTR_STRING);
@@ -389,8 +426,136 @@ scan_string_open(int spec_idx, const struct lang_spec *spec, const char *line,
 }
 
 static int
+is_char_literal(const char *line, int len, int i)
+{
+	/*
+	 * == True if a one-character literal opens at line[i] ==
+	 *
+	 * line[i] is the quote.  Two shapes count: an escape sequence
+	 * ('\n', '\x41', '\u{1F600}'), which is recognized by the
+	 * backslash and bounded by the closing quote on the same line; and a
+	 * single character, whose closing quote must follow it immediately,
+	 * one byte later for ASCII and up to four for UTF-8.  The width of
+	 * that one character comes from stepfwd(), so it is the width the
+	 * editor's cursor motion uses.  Everything else is a Rust lifetime or
+	 * loop label ('a, 'static, 'outer), which the caller leaves to
+	 * lang_spec.label_char.
+	 */
+	const char *end = line + len;
+	const char *next;
+	int j;
+
+	if (i + 1 >= len)
+		return 0;
+	if (line[i + 1] == '\\') {
+		for (j = i + 2; j < len && j <= i + 12; j++) {
+			if (line[j] == '\'')
+				return 1;
+		}
+		return 0;
+	}
+	next = stepfwd(line + i + 1, end);
+	return next < end && *next == '\'';
+}
+
+static int
+raw_spec_index(const struct lang_spec *spec)
+{
+	/*
+	 * == Index of the string spec that has a raw form, or -1 ==
+	 *
+	 * The cross-line state of a raw string counts the hashes of its open
+	 * delimiter and not the spec it belongs to, so at most one spec per
+	 * language may set .raw, and this lookup recovers it when a raw
+	 * string resumes on the next line.
+	 */
+	int k;
+
+	if (!spec->strings || !spec->raw_prefix)
+		return -1;
+	for (k = 0; spec->strings[k].open; k++) {
+		if (spec->strings[k].raw)
+			return k;
+	}
+	return -1;
+}
+
+static int
+scan_raw_string(const struct str_spec *ss, const struct lang_spec *spec,
+                 const char *line, int len, int color_from, int i, int hashes,
+                 char *attrs, int *out_state)
+{
+	/*
+	 * == Scan the body of a raw string ==
+	 *
+	 * A raw string has no byte escapes, so it closes at the first
+	 * delimiter followed by exactly the hashes the open delimiter
+	 * carried, and nothing else ends it: that is what keeps r"C:\dir\"
+	 * closed and the hashed form r#"say "hi""# open across its inner
+	 * quotes.  i is where the body starts, just past the open delimiter,
+	 * or 0 when resuming from the previous line, and color_from..i is
+	 * colored first.
+	 *
+	 * Returns the index just past the string.  *out_state is CS_NORMAL if
+	 * it closed on this line, or CS_RAW_BASE + hashes if ss->cross_line
+	 * and it did not.  A close delimiter split over a line boundary (the
+	 * quote last on one line and its hashes first on the next) does not
+	 * close the string, since the state counts hashes and not a partial
+	 * match.
+	 */
+	int k;
+
+	fill_attrs(attrs, color_from, i, ATTR_STRING);
+	while (i < len) {
+		if (line[i] == ss->open) {
+			for (k = 0; k < hashes; k++) {
+				if (i + 1 + k >= len ||
+				    line[i + 1 + k] != spec->raw_hash)
+					break;
+			}
+			if (k == hashes) {
+				fill_attrs(attrs, i, i + 1 + hashes, ATTR_STRING);
+				*out_state = CS_NORMAL;
+				return i + 1 + hashes;
+			}
+		}
+		fill_attrs(attrs, i, i + 1, ATTR_STRING);
+		i++;
+	}
+	*out_state = ss->cross_line ? CS_RAW_BASE + hashes : CS_NORMAL;
+	return i;
+}
+
+static int
+scan_raw_ident(const struct lang_spec *spec, const char *line, int len, int i)
+{
+	/*
+	 * == Step over a raw identifier, as in the Rust r#type or r#match ==
+	 *
+	 * line[i] is the raw_prefix letter.  A raw identifier is that letter,
+	 * one raw_hash, and a name the language would otherwise read as a
+	 * keyword, so the whole token stays ATTR_NORMAL and the name is kept
+	 * out of the keyword lookup.  Returns the index just past the token,
+	 * or i when no raw identifier starts there, which is also the case
+	 * for the raw string r#"..."#, whose delimiter follows the hashes.
+	 */
+	int j;
+
+	if (!spec->raw_prefix || !spec->raw_hash)
+		return i;
+	if (line[i] != spec->raw_prefix)
+		return i;
+	if (i + 2 >= len || line[i + 1] != spec->raw_hash ||
+	    !is_ident_start((unsigned char)line[i + 2]))
+		return i;
+	for (j = i + 2; j < len && is_ident((unsigned char)line[j]); j++)
+		;
+	return j;
+}
+
+static int
 try_open_string(const char *line, int len, int i, const struct lang_spec *spec,
-                 int *out_spec_idx)
+                 int *out_spec_idx, int *out_hashes)
 {
 	/*
 	 * == Check whether a string opens at line[i] ==
@@ -399,13 +564,25 @@ try_open_string(const char *line, int len, int i, const struct lang_spec *spec,
 	 * start an identifier, peeks ahead through b/f/r/u prefix letters
 	 * for a delimiter belonging to a prefixable spec.  The peek never
 	 * mutates state, so a failed peek leaves the caller free to fall
-	 * back to plain identifier scanning from i.  Returns the index of
+	 * back to plain identifier scanning from i.  A char_literal spec is
+	 * skipped unless a one-character literal really opens there, which is
+	 * how a Rust lifetime is told from a character.  Returns the index of
 	 * the delimiter byte (spec index via *out_spec_idx), or -1.
+	 *
+	 * *out_hashes is the number of raw_hash bytes between the prefix
+	 * letters and the delimiter, or -1 when the literal is not raw.  It
+	 * is 0 for a raw form carrying no hashes, as in r"...", which still
+	 * has no escapes, so the caller tells the two apart by the sign.
 	 */
-	int j, k;
+	int j, k, raw = 0;
+
+	*out_hashes = -1;
 
 	for (k = 0; spec->strings[k].open; k++) {
 		if (line[i] == spec->strings[k].open) {
+			if (spec->strings[k].char_literal &&
+			    !is_char_literal(line, len, i))
+				continue;
 			*out_spec_idx = k;
 			return i;
 		}
@@ -418,15 +595,36 @@ try_open_string(const char *line, int len, int i, const struct lang_spec *spec,
 	while (j < len) {
 		unsigned char p = (unsigned char)line[j];
 		if (p == 'b' || p == 'B' || p == 'f' || p == 'F' ||
-		    p == 'r' || p == 'R' || p == 'u' || p == 'U')
+		    p == 'r' || p == 'R' || p == 'u' || p == 'U') {
+			if (spec->raw_prefix &&
+			    tolower(p) == tolower((unsigned char)spec->raw_prefix))
+				raw = 1;
 			j++;
-		else
+		} else {
 			break;
+		}
 	}
-	if (j == i || j >= len)
+	if (j == i)
+		return -1;
+	if (raw && spec->raw_hash) {
+		int hashes = 0;
+
+		while (j + hashes < len && line[j + hashes] == spec->raw_hash)
+			hashes++;
+		j += hashes;
+		*out_hashes = hashes;
+	} else if (raw) {
+		*out_hashes = 0;
+	}
+	if (j >= len)
 		return -1;
 	for (k = 0; spec->strings[k].open; k++) {
 		if (spec->strings[k].prefixable && line[j] == spec->strings[k].open) {
+			if (spec->strings[k].char_literal &&
+			    !is_char_literal(line, len, j))
+				continue;
+			if (*out_hashes >= 0 && !spec->strings[k].raw)
+				continue;
 			*out_spec_idx = k;
 			return j;
 		}
@@ -446,6 +644,7 @@ colorize_generic(int state, const char *line, int len, char *attrs,
 	 */
 	int i = 0;
 	int kw_ok = 1;
+	int raw_idx;
 	int operand = 0; /* regex_slash: last token was an operand, so '/' divides */
 
 	fill_attrs(attrs, 0, len, ATTR_NORMAL);
@@ -470,7 +669,17 @@ colorize_generic(int state, const char *line, int len, char *attrs,
 		return (len > 0 && line[len - 1] == '\\') ? CS_BOL_CONT : CS_NORMAL;
 	}
 
-	if (spec->strings && state >= CS_STRING_BASE) {
+	if (state >= CS_RAW_BASE && (raw_idx = raw_spec_index(spec)) >= 0) {
+		int new_state;
+
+		i = scan_raw_string(&spec->strings[raw_idx], spec, line, len, 0,
+		                     0, state - CS_RAW_BASE, attrs, &new_state);
+		if (new_state != CS_NORMAL)
+			return new_state;
+		goto normal;
+	}
+
+	if (spec->strings && state >= CS_STRING_BASE && state < CS_RAW_BASE) {
 		int idx = state - CS_STRING_BASE;
 		const struct str_spec *ss = &spec->strings[idx];
 
@@ -498,7 +707,7 @@ colorize_generic(int state, const char *line, int len, char *attrs,
 normal:
 	while (i < len) {
 		unsigned char c = (unsigned char)line[i];
-		int spec_idx, quote_pos;
+		int spec_idx, quote_pos, hashes, raw_end;
 
 		if (spec->bol_char && c == (unsigned char)spec->bol_char &&
 		    is_bol(line, i)) {
@@ -532,13 +741,23 @@ normal:
 		}
 
 		if (spec->decorator_char && c == (unsigned char)spec->decorator_char) {
-			i = scan_sigil(line, len, i, attrs);
-			operand = 0;
-			continue;
+			int end = scan_sigil(line, len, i, attrs,
+			                      spec->decorator_bracket);
+
+			if (end > i) {
+				i = end;
+				operand = 0;
+				continue;
+			}
+			/*
+			 * Bracket mode and no [...] list follows, so this is no
+			 * attribute: scan on, and the byte falls to the
+			 * punctuation tail below as the operator it is.
+			 */
 		}
 
 		if (spec->sigil_char && c == (unsigned char)spec->sigil_char) {
-			i = scan_sigil(line, len, i, attrs);
+			i = scan_sigil(line, len, i, attrs, 0);
 			operand = 1;
 			continue;
 		}
@@ -554,14 +773,48 @@ normal:
 			}
 		}
 
-		quote_pos = try_open_string(line, len, i, spec, &spec_idx);
+		/*
+		 * A raw identifier is stepped over whole, before the string
+		 * attempt sees its prefix letter and before its name reaches
+		 * the keyword lookup.
+		 */
+		raw_end = scan_raw_ident(spec, line, len, i);
+		if (raw_end > i) {
+			i = raw_end;
+			operand = 1;
+			continue;
+		}
+
+		quote_pos = try_open_string(line, len, i, spec, &spec_idx,
+		                             &hashes);
 		if (quote_pos >= 0) {
 			int new_state;
 
-			i = scan_string_open(spec_idx, spec, line, len, i,
-			                      quote_pos, attrs, &new_state);
+			if (hashes >= 0)
+				i = scan_raw_string(&spec->strings[spec_idx],
+				                     spec, line, len, i,
+				                     quote_pos + 1, hashes,
+				                     attrs, &new_state);
+			else
+				i = scan_string_open(spec_idx, spec, line, len,
+				                      i, quote_pos, attrs,
+				                      &new_state);
 			if (new_state != CS_NORMAL)
 				return new_state;
+			operand = 1;
+			continue;
+		}
+
+		/*
+		 * A label_char quote that opened no literal above introduces a
+		 * lifetime or a loop label, so the quote and the name after it
+		 * stay ATTR_NORMAL and are stepped over as one token - that
+		 * keeps a name such as 'static out of the keyword lookup.
+		 */
+		if (spec->label_char && c == (unsigned char)spec->label_char) {
+			i++;
+			while (i < len && is_ident((unsigned char)line[i]))
+				i++;
 			operand = 1;
 			continue;
 		}
