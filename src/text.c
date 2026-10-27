@@ -1,15 +1,5 @@
 /*
  * text.c - read access to the text, which lives in a piece tree (pt.c).
- *
- * The old buffer was one contiguous slab, and the code read it through
- * char pointers.  These functions are the offset-based replacements:
- *
- *   *p                      text_char(g, p)
- *   memchr(p, c, end - p)   text_find(g, p, c)
- *   memrchr(text, c, p - text)
- *                           text_rfind(g, p, c)
- *   memcpy(dst, p, n)       text_read(g, p, n, dst)
- *   *p = c (no undo)        text_set_char(g, p, c)
  */
 #include "text.h"
 
