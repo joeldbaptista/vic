@@ -561,11 +561,16 @@ opens a character literal only when one character and its closing quote
 follow it, so a lifetime or a loop label
 .RB ( 'a ,
 .BR 'static )
-is left uncoloured; a nested block comment closes at the first
+is left uncoloured, and a raw string
+.RB ( r"..." ,
+.BR r#"..."# )
+has no backslash escapes and closes only at a quote carrying as many
+.B #
+as its opening delimiter did.  A nested block comment closes at the first
 .BR */ ,
-and a hashed raw string
-.RB ( r#"..."# )
-is scanned as an ordinary string.
+so the text from there to the outer close is coloured as code, and an
+attribute is scanned to the end of its line only, so the rest of an
+attribute split over several lines is coloured as code too.
 .SH STARTUP CONFIGURATION
 On startup,
 .B vic
