@@ -62,6 +62,7 @@ static const char *const c_keywords[] = {
     "short",
     "signed",
     "sizeof",
+    "size_t",
     "static",
     "struct",
     "switch",
