@@ -146,20 +146,26 @@ Last updated: 2026-10-22.
   words the language reserves (`become`, `yield`, ...), the primitive type names (`i32`,
   `u8`, `f64`, `bool`, `char`, `str`, ...), which the language builds in, attributes
   (`#[derive(Debug)]`, `#![allow(...)]`), `//` line comments (so also the doc forms `///`
-  and `//!`), block comments spanning lines, string literals including the `b` and `r`
-  prefixed forms, character literals (`'x'`, `'\n'`, `b'0'`), and numbers (decimal, `0x`
-  hex, `0o` octal, `0b` binary, float with exponent, `_` digit separators, and type
-  suffixes such as `1u8` and `2.0f32`). A `'` opens a character literal only when one
-  character and its closing quote follow it, so a lifetime or a loop label (`'a`,
-  `'static`, `'outer`) stays uncoloured rather than opening a literal that runs to the
-  end of the line. A string literal may span lines, which Rust allows. Two constructs
-  are approximated, in both cases leaving text uncoloured rather than colouring it
-  wrongly: a nested block comment closes at the first `*/`, so the text from there to
-  the outer close is scanned as code; and a hashed raw string (`r#"..."#`) is scanned as
-  an ordinary string, so its hashes colour as an attribute sigil and a quote inside the
-  body ends the string early. Library names are not keywords to Rust, so `Option`,
-  `Result`, `Some`, `None`, `Ok`, `Err`, `Vec` and `String` are ordinary names and are
-  not highlighted.
+  and `//!`), block comments spanning lines, string literals including the `b` prefixed
+  form and the raw forms (`r"..."`, `br"..."`, `r#"..."#`), character literals (`'x'`,
+  `'\n'`, `b'0'`), and numbers (decimal, `0x` hex, `0o` octal, `0b` binary, float with
+  exponent, `_` digit separators, and type suffixes such as `1u8` and `2.0f32`). A `'`
+  opens a character literal only when one character and its closing quote follow it, so a
+  lifetime or a loop label (`'a`, `'static`, `'outer`) stays uncoloured rather than
+  opening a literal that runs to the end of the line. A raw string has no backslash
+  escapes and closes only at a quote carrying as many `#` as its opening delimiter did, so
+  neither a trailing backslash (`r"C:\dir\"`) nor a quote in the body of a hashed form
+  ends it early. A raw identifier (`r#type`, `r#match`) is a name and not an attribute, and
+  its keyword-like part is not treated as a keyword. A string literal may span lines, which
+  Rust allows. Three constructs are approximated: a nested block comment closes at the
+  first `*/`, so the text from there to the outer close is scanned and coloured as code,
+  and a quote left unpaired there opens a string that carries on to the following lines; an
+  attribute is scanned to the end of its line only, so an attribute whose list is split
+  over lines, as rustfmt writes a long derive list, keeps its colour on the first line
+  while the rest of the list is scanned as code; and a raw string closes only when its
+  quote and all of its hashes sit on the same line. Library names are not keywords to Rust,
+  so `Option`, `Result`, `Some`, `None`, `Ok`, `Err`, `Vec` and `String` are ordinary names
+  and are not highlighted.
 - Dockerfiles: instructions (`FROM`, `RUN`, `COPY`, ...) at the head of a logical line,
   variable expansions (`$VAR`, `${VAR}`), `#` comments, quoted strings, numbers. A line
   continued with a trailing backslash does not start a new instruction on the next line.

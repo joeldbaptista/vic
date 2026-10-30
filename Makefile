@@ -168,50 +168,50 @@ tests/test_buffer: tests/test_buffer.c src/buffer.c src/pt.c src/text.c src/line
 tests/test_codepoint: tests/test_codepoint.c src/codepoint.c src/line.c src/utf8.c src/compat.c src/pt.c src/text.c
 	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_codepoint.c src/codepoint.c src/line.c src/utf8.c src/compat.c src/pt.c src/text.c
 
-tests/test_color_c: tests/test_color_c.c src/color_c.c src/color_generic.c
-	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_c.c src/color_c.c src/color_generic.c
+tests/test_color_c: tests/test_color_c.c src/color_c.c src/color_generic.c src/utf8.c
+	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_c.c src/color_c.c src/color_generic.c src/utf8.c
 
-tests/test_color_py: tests/test_color_py.c src/color_py.c src/color_generic.c
-	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_py.c src/color_py.c src/color_generic.c
+tests/test_color_py: tests/test_color_py.c src/color_py.c src/color_generic.c src/utf8.c
+	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_py.c src/color_py.c src/color_generic.c src/utf8.c
 
-tests/test_color_sh: tests/test_color_sh.c src/color_sh.c src/color_generic.c
-	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_sh.c src/color_sh.c src/color_generic.c
+tests/test_color_sh: tests/test_color_sh.c src/color_sh.c src/color_generic.c src/utf8.c
+	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_sh.c src/color_sh.c src/color_generic.c src/utf8.c
 
 tests/test_color_md: tests/test_color_md.c src/color_md.c
 	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_md.c src/color_md.c
 
-tests/test_color_sql: tests/test_color_sql.c src/color_sql.c src/color_generic.c
-	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_sql.c src/color_sql.c src/color_generic.c
+tests/test_color_sql: tests/test_color_sql.c src/color_sql.c src/color_generic.c src/utf8.c
+	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_sql.c src/color_sql.c src/color_generic.c src/utf8.c
 
 # The Dockerfile test also exercises colorizer_find(), so it links the whole
 # registry rather than one colorizer.
-tests/test_color_docker: tests/test_color_docker.c src/color_docker.c src/color_yaml.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_tf.c src/color_make.c src/color_awk.c src/color_rust.c src/color_generic.c
-	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_docker.c src/color_docker.c src/color_yaml.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_tf.c src/color_make.c src/color_awk.c src/color_rust.c src/color_generic.c
+tests/test_color_docker: tests/test_color_docker.c src/color_docker.c src/color_yaml.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_tf.c src/color_make.c src/color_awk.c src/color_rust.c src/color_generic.c src/utf8.c
+	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_docker.c src/color_docker.c src/color_yaml.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_tf.c src/color_make.c src/color_awk.c src/color_rust.c src/color_generic.c src/utf8.c
 
 # The YAML test also exercises colorizer_find(), so it links the whole
 # registry rather than one colorizer.
-tests/test_color_yaml: tests/test_color_yaml.c src/color_yaml.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_docker.c src/color_tf.c src/color_make.c src/color_awk.c src/color_rust.c src/color_generic.c
-	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_yaml.c src/color_yaml.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_docker.c src/color_tf.c src/color_make.c src/color_awk.c src/color_rust.c src/color_generic.c
+tests/test_color_yaml: tests/test_color_yaml.c src/color_yaml.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_docker.c src/color_tf.c src/color_make.c src/color_awk.c src/color_rust.c src/color_generic.c src/utf8.c
+	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_yaml.c src/color_yaml.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_docker.c src/color_tf.c src/color_make.c src/color_awk.c src/color_rust.c src/color_generic.c src/utf8.c
 
 # The Terraform test also exercises colorizer_find(), so it links the whole
 # registry rather than one colorizer.
-tests/test_color_tf: tests/test_color_tf.c src/color_tf.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_docker.c src/color_yaml.c src/color_make.c src/color_awk.c src/color_rust.c src/color_generic.c
-	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_tf.c src/color_tf.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_docker.c src/color_yaml.c src/color_make.c src/color_awk.c src/color_rust.c src/color_generic.c
+tests/test_color_tf: tests/test_color_tf.c src/color_tf.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_docker.c src/color_yaml.c src/color_make.c src/color_awk.c src/color_rust.c src/color_generic.c src/utf8.c
+	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_tf.c src/color_tf.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_docker.c src/color_yaml.c src/color_make.c src/color_awk.c src/color_rust.c src/color_generic.c src/utf8.c
 
 # The makefile test also exercises colorizer_find(), so it links the whole
 # registry rather than one colorizer.
-tests/test_color_make: tests/test_color_make.c src/color_make.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_docker.c src/color_yaml.c src/color_tf.c src/color_awk.c src/color_rust.c src/color_generic.c
-	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_make.c src/color_make.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_docker.c src/color_yaml.c src/color_tf.c src/color_awk.c src/color_rust.c src/color_generic.c
+tests/test_color_make: tests/test_color_make.c src/color_make.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_docker.c src/color_yaml.c src/color_tf.c src/color_awk.c src/color_rust.c src/color_generic.c src/utf8.c
+	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_make.c src/color_make.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_docker.c src/color_yaml.c src/color_tf.c src/color_awk.c src/color_rust.c src/color_generic.c src/utf8.c
 
 # The awk test also exercises colorizer_find(), so it links the whole
 # registry rather than one colorizer.
-tests/test_color_awk: tests/test_color_awk.c src/color_awk.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_docker.c src/color_yaml.c src/color_tf.c src/color_make.c src/color_rust.c src/color_generic.c
-	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_awk.c src/color_awk.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_docker.c src/color_yaml.c src/color_tf.c src/color_make.c src/color_rust.c src/color_generic.c
+tests/test_color_awk: tests/test_color_awk.c src/color_awk.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_docker.c src/color_yaml.c src/color_tf.c src/color_make.c src/color_rust.c src/color_generic.c src/utf8.c
+	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_awk.c src/color_awk.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_docker.c src/color_yaml.c src/color_tf.c src/color_make.c src/color_rust.c src/color_generic.c src/utf8.c
 
 # The Rust test also exercises colorizer_find(), so it links the whole
 # registry rather than one colorizer.
-tests/test_color_rust: tests/test_color_rust.c src/color_rust.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_docker.c src/color_yaml.c src/color_tf.c src/color_make.c src/color_awk.c src/color_generic.c
-	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_rust.c src/color_rust.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_docker.c src/color_yaml.c src/color_tf.c src/color_make.c src/color_awk.c src/color_generic.c
+tests/test_color_rust: tests/test_color_rust.c src/color_rust.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_docker.c src/color_yaml.c src/color_tf.c src/color_make.c src/color_awk.c src/color_generic.c src/utf8.c
+	$(CC) $(CFLAGS) -I tests -I src -o $@ tests/test_color_rust.c src/color_rust.c src/color.c src/color_c.c src/color_sh.c src/color_md.c src/color_sql.c src/color_py.c src/color_docker.c src/color_yaml.c src/color_tf.c src/color_make.c src/color_awk.c src/color_generic.c src/utf8.c
 
 # Build and run every unit test.  All of them run before the rule
 # reports, so one broken module does not hide the state of the rest; the
