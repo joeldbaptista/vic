@@ -448,6 +448,45 @@ char c       = 'a';
                     (\uXXXX decoded to UTF-8)
 ```
 
+### External filters
+
+```
+:run pipe CMD       filter the range through the shell command CMD
+```
+
+The range is written to `CMD`'s standard input and, if `CMD` exits 0,
+replaced by what `CMD` wrote to its standard output. A non-zero exit leaves
+the text alone and shows `CMD`'s standard error on the status bar, so a
+syntax error from the command costs nothing.
+
+With no address the range is the whole buffer, so this reformats the file:
+```
+:run pipe jq .
+```
+After a visual selection the range is the selected lines:
+```
+:'<,'>run pipe jq .
+```
+
+More examples:
+```
+:run pipe jq -c '[.a, .b] | add'   one jq program, the '|' kept inside it
+:run pipe sort | head -2           a shell pipeline, the '|' left bare
+:'<,'>run pipe column -t           align the selected lines into columns
+:%run pipe clang-format            reformat the whole file
+```
+
+This is the same filter as `:{range}!CMD`, reached through the `:run`
+table, so it is linewise in the same way: an address resolves to whole
+lines, and a charwise selection is widened to the lines it touches.
+
+A quoted argument that holds whitespace is quoted again before `/bin/sh`
+sees it, which is why the `|` inside `'[.a, .b] | add'` stays part of the
+jq program while the bare `|` in `sort | head -2` stays a shell pipeline.
+One case is not covered: a quoted argument with no whitespace in it is not
+quoted again, so `:run pipe grep '*'` reaches the shell unquoted and the
+shell expands it. Wrap such a command in `sh -c '…'` if that matters.
+
 ### Statistics
 
 ```

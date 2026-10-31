@@ -1129,6 +1129,29 @@ static const struct tc cases[] = {
 	 * — an unanchored chain makes one 'u' swallow the previous command. */
 	TC("filter-sentinel-undo", "x:$!sed 's/^/X/'\ru:write\r", "abc\n\n", "bc\n\n"),
 	TC("run-sentinel-undo",    "x:$run number\ru:write\r",    "abc\n\n", "bc\n\n"),
+
+	/* :run pipe — the same filter, reached through the :run table.  With no
+	 * address the range is the whole buffer. */
+	TC("run-pipe-whole-buffer", ":run pipe sort\r:write\r",
+	                            "banana\napple\ncherry\n", "apple\nbanana\ncherry\n"),
+	TC("run-pipe-range",        ":2,3run pipe sort\r:write\r",
+	                            "z\nbanana\napple\ny\n",   "z\napple\nbanana\ny\n"),
+	/* The visual-mode ':' prefills ":'<,'>", so the selection is the range. */
+	TC("run-pipe-visual",       "Vj:run pipe sort\r:write\r",
+	                            "banana\napple\ncherry\n", "apple\nbanana\ncherry\n"),
+	/* A quoted argument holding whitespace is quoted again before /bin/sh
+	 * sees it, so the ';' inside it stays one sed script rather than two
+	 * shell commands. */
+	TC("run-pipe-quoted-arg",   ":run pipe sed -e 's/a/X/; s/b/Y/'\r:write\r",
+	                            "ab\n", "XY\n"),
+	/* An unquoted '|' stays a shell pipeline. */
+	TC("run-pipe-pipeline",     ":run pipe sort | head -2\r:write\r",
+	                            "c\na\nb\n", "a\nb\n"),
+	/* A non-zero exit leaves the text untouched. */
+	TC("run-pipe-fail-noop",    ":run pipe false\r:write\r",
+	                            "banana\napple\n", "banana\napple\n"),
+	TC("run-pipe-undo",         ":run pipe sort\ru:write\r",
+	                            "banana\napple\ncherry\n", "banana\napple\ncherry\n"),
 };
 
 /* ------------------------------------------------------------------ */

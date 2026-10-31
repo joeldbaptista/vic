@@ -1184,7 +1184,7 @@ colon_do_yank(struct editor *g, const struct colon_state *cs)
 /*
  * Tokenise buf into argv[].  Tokens are whitespace-separated; single- and
  * double-quoted tokens may contain spaces.  Modifies buf in-place.
- * Returns argc (never exceeds max_argc).
+ * Returns argc, or -1 when buf holds more tokens than max_argc.
  */
 #define RUN_MAX_ARGS 32
 static int
@@ -1196,7 +1196,13 @@ run_tokenize(char *buf, char *argv[], int max_argc)
 	 * Splits buf on whitespace.  Single- and double-quoted tokens may
 	 * contain embedded spaces (the quote characters are stripped).
 	 * Modifies buf in-place by NUL-terminating each token.
-	 * Returns argc (capped at max_argc).
+	 *
+	 * - Returns argc, or -1 when buf holds more than max_argc tokens.
+	 *
+	 * Overflow is an error rather than a silent truncation because the
+	 * tail that would be dropped changes what the command does: ':run
+	 * pipe' rebuilds a shell command line out of argv and would otherwise
+	 * filter the text through a command the user did not write.
 	 */
 	int argc = 0;
 	char *p = buf;
@@ -1220,6 +1226,12 @@ run_tokenize(char *buf, char *argv[], int max_argc)
 			if (*p)
 				*p++ = '\0';
 		}
+	}
+	if (argc == max_argc) {
+		while (*p == ' ' || *p == '\t')
+			p++;
+		if (*p != '\0')
+			return -1;
 	}
 	return argc;
 }
@@ -1247,6 +1259,11 @@ colon_do_run(struct editor *g, const struct colon_state *cs)
 	}
 
 	argc = run_tokenize(cs->args, argv, RUN_MAX_ARGS);
+	if (argc < 0) {
+		status_line(g, ":run: too many arguments (max %d)",
+		            RUN_MAX_ARGS - 1);
+		return;
+	}
 	if (argc == 0) {
 		status_line(g, ":run: no command given");
 		return;
