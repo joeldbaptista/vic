@@ -30,11 +30,13 @@
  *   hash                     — FNV-1a hash of entire range
  *   hash mod N               — per-identifier hash%N; report collisions
  *   hash replace [mod N]     — replace identifiers with hash literals
+ *   pipe <shell command>     — filter range through a shell command
  *   highlight [pattern]      — set or clear the viewport highlight pattern
  *   color-escape [on|off]    — render SGR escapes in the buffer as colour
  */
 #include "run.h"
 #include "buffer.h"
+#include "ex.h"
 #include "screen.h"
 #include "status.h"
 #include "text.h"
@@ -1654,6 +1656,118 @@ run_color_escape(struct editor *g, int argc, char *argv[],
 		status_line(g, "color-escape %s", g->color_escape ? "on" : "off");
 }
 
+/* ---- pipe -------------------------------------------------------------- */
+
+static int
+pipe_needs_quotes(const char *s)
+{
+	/*
+	 * == True if s must be quoted again before /bin/sh re-reads it ==
+	 *
+	 * run_tokenize() in ex.c splits unquoted words on whitespace and
+	 * strips the quotes off the ones that were quoted, so a token that
+	 * still holds a space or a tab can only have arrived quoted.  Quoting
+	 * exactly those tokens again keeps both uses working: in
+	 * ":run pipe jq '.a | .b'" the '|' stays inside one argument, while in
+	 * ":run pipe grep foo | sort" the bare '|' stays the shell pipeline
+	 * the user wrote.  An empty token is quoted too, since it would
+	 * otherwise vanish.
+	 *
+	 * The case this misses is a quoted token with no whitespace in it,
+	 * such as the '*' in ":run pipe grep '*'": it reaches the shell bare
+	 * and the shell expands it.
+	 */
+	if (*s == '\0')
+		return 1;
+	for (; *s; s++) {
+		if (*s == ' ' || *s == '\t')
+			return 1;
+	}
+	return 0;
+}
+
+static char *
+pipe_build_cmd(int argc, char *argv[])
+{
+	/*
+	 * == Rebuild one shell command line out of argv[1..argc-1] ==
+	 *
+	 * Returns a malloc'd string the caller frees, or NULL when the
+	 * allocation fails.  A single quote inside a quoted token is written
+	 * as the four bytes '\'' — close, escape, reopen — which is what the
+	 * size estimate of four bytes per input byte allows for.
+	 */
+	size_t need = 1;
+	char *cmd;
+	char *out;
+	const char *s;
+	int i;
+
+	for (i = 1; i < argc; i++)
+		need += 4 * strlen(argv[i]) + 3;
+	cmd = malloc(need);
+	if (cmd == NULL)
+		return NULL;
+
+	out = cmd;
+	for (i = 1; i < argc; i++) {
+		if (i > 1)
+			*out++ = ' ';
+		if (!pipe_needs_quotes(argv[i])) {
+			for (s = argv[i]; *s; s++)
+				*out++ = *s;
+			continue;
+		}
+		*out++ = '\'';
+		for (s = argv[i]; *s; s++) {
+			if (*s == '\'') {
+				memcpy(out, "'\\''", 4);
+				out += 4;
+			} else
+				*out++ = *s;
+		}
+		*out++ = '\'';
+	}
+	*out = '\0';
+	return cmd;
+}
+
+static void
+run_pipe(struct editor *g, int argc, char *argv[],
+         int rs, int re)
+{
+	/*
+	 * == :run pipe <shell command> — filter the range through a command ==
+	 *
+	 * ":run pipe jq" sends the whole buffer to jq and replaces it with
+	 * what jq prints; ":'<,'>run pipe jq" does the same for the selected
+	 * lines.  The work is colon_do_filter() in ex.c, the same code behind
+	 * ":{range}!cmd": the range becomes the command's stdin and, on exit
+	 * status 0, is replaced by the command's stdout.  A non-zero exit
+	 * leaves the text untouched and puts the command's stderr on the
+	 * status line, so a parse error from jq costs nothing.
+	 *
+	 * The range is whole lines, as it is for ':!': an address resolves to
+	 * line boundaries before run_dispatch sees it, and no address at all
+	 * means the whole buffer.
+	 */
+	char *cmd;
+
+	if (argc < 2) {
+		status_line(g, "pipe: no command given");
+		return;
+	}
+	if (re < rs) {
+		status_line(g, "pipe: empty range");
+		return;
+	}
+	cmd = pipe_build_cmd(argc, argv);
+	if (cmd == NULL)
+		return;
+	colon_do_filter(g, rs, re, cmd);
+	free(cmd);
+}
+
 /* ---- dispatch table ---------------------------------------------------- */
 
 static const struct run_entry run_table[] = {
@@ -1679,6 +1793,7 @@ static const struct run_entry run_table[] = {
     {"freq", run_freq},
     {"col", run_col},
     {"hash", run_hash},
+    {"pipe", run_pipe},
     {"highlight", run_highlight},
     {"color-escape", run_color_escape},
     {NULL, NULL},

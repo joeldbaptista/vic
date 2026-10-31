@@ -455,6 +455,42 @@ Without a range, the entire buffer is used.
 :run hash replace       replace every identifier with its raw 64-bit hash
 :run hash replace mod \fIN\fR replace every identifier with hash%N
 .fi
+.SS External Filters
+.nf
+:run pipe \fIcmd\fR      filter the range through the shell command \fIcmd\fR
+.fi
+The range is written to
+.IR cmd 's
+standard input and, if
+.I cmd
+exits 0, replaced by what
+.I cmd
+wrote to its standard output.
+A non-zero exit leaves the text untouched and shows
+.IR cmd 's
+standard error on the status line.
+With no address the range is the whole buffer, so
+.B :run pipe jq .
+reformats the file; after a visual selection
+.B :'<,'>run pipe jq .
+reformats the selected lines.
+This is the same filter as
+.BR ":{range}!" cmd ,
+reached through the
+.B :run
+table, so it is linewise in the same way.
+.PP
+Arguments are re-quoted before
+.B /bin/sh
+sees them, so a quoted argument holding whitespace stays one argument
+.RB ( ":run pipe jq '[.a, .b] | add'" )
+while a bare
+.B |
+stays a shell pipeline
+.RB ( ":run pipe sort | head -2" ).
+A quoted argument with no whitespace in it is not re-quoted, so
+.B :run pipe grep '*'
+reaches the shell unquoted and is expanded by it.
 .SS Identifier Case Conversion
 .nf
 :run convert c2s    camelCase \(-> snake_case
