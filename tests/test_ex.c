@@ -705,6 +705,7 @@ test_set_needs_two_letters(void)
      * 'se'.  With no pattern the substitute reports rather than acting. */
     ex("s");
     CHECK(strcmp(dump(), "foo\n") == 0);
+    CHECK(said("missing delimiters"));
 }
 
 /* ---- :mark -------------------------------------------------------------- */

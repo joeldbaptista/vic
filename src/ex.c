@@ -960,9 +960,13 @@ colon_do_substitute(struct editor *g, const struct colon_state *cs)
 	char *Rorig;
 	int undo = 0;
 
+	/* With no arguments buf is "", and buf + 1 is past its NUL. */
 	c = buf[0];
-	F = buf + 1;
-	R = strchr_backslash(F, c);
+	R = NULL;
+	if (c != '\0') {
+		F = buf + 1;
+		R = strchr_backslash(F, c);
+	}
 	if (!R) {
 		status_line(g, ":s expression missing delimiters");
 		return;
