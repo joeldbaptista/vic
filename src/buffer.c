@@ -460,6 +460,11 @@ init_text_buffer(struct editor *g, char *fn)
 		 */
 		fn = NULL;
 		rc = stdin_text_insert(g, 0);
+	} else if (fn == NULL) {
+		/* No file (a bare `vic`, or the startup scratch buffer): an
+		 * empty buffer, the same result as a file that does not exist
+		 * yet, without handing NULL to open(). */
+		rc = -1;
 	} else {
 		update_filename(g, fn);
 		rc = file_insert(g, fn, 0, 1);
