@@ -818,6 +818,7 @@ colon_do_read(struct editor *g, const struct colon_state *cs)
 	int size;
 	int num;
 	char *fn = g->current_filename;
+	char *exp = NULL; /* expanded argument, owned here */
 	int q;
 
 	if (cs->args[0] == '!' || cs->useforce) {
@@ -829,9 +830,10 @@ colon_do_read(struct editor *g, const struct colon_state *cs)
 	}
 
 	if (cs->args[0]) {
-		fn = expand_args(g, cs->args);
-		if (fn == NULL)
+		exp = expand_args(g, cs->args);
+		if (exp == NULL)
 			return;
+		fn = exp;
 		init_filename(g, fn);
 	} else if (g->current_filename == NULL) {
 		status_line_bold(g, "No current filename");
@@ -848,12 +850,13 @@ colon_do_read(struct editor *g, const struct colon_state *cs)
 	if (q == text_len(g))
 		num++;
 	size = file_insert(g, fn, q, 0);
-	if (size < 0)
-		return;
-	status_line(g, "'%s'%s %uL, %uC", fn,
-	            (g->readonly_mode ? " [Readonly]" : ""),
-	            count_lines(g, q, q + size - 1), size);
-	g->dot = find_line(g, num);
+	if (size >= 0) {
+		status_line(g, "'%s'%s %uL, %uC", fn,
+		            (g->readonly_mode ? " [Readonly]" : ""),
+		            count_lines(g, q, q + size - 1), size);
+		g->dot = find_line(g, num);
+	}
+	free(exp);
 }
 
 static void
