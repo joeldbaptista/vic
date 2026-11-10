@@ -268,6 +268,24 @@ test_screen_erase(void)
     CHECK(row((int)g.rows - 1)[0] == '\0');
 }
 
+static void
+test_screen_erase_uses_allocated_rows(void)
+{
+    init("abc\n");
+    /* The buffer is sized by new_screen's argument, not g.rows, so erase
+     * must cover exactly the allocated rows: no fewer, and no more. */
+    g.rows = 4;
+    new_screen(&g, 8, 20);
+    memset(g.screen, 'x', (size_t)g.screensize);
+    screen_erase(&g);
+    CHECK(row(0)[0] == '\0');
+    CHECK(row(7)[0] == '\0');
+
+    g.rows = 8;
+    new_screen(&g, 4, 20);
+    CHECK(row(3)[0] == '\0');
+}
+
 /* ---- screen_line_number_width ------------------------------------------- */
 
 static void
@@ -744,6 +762,7 @@ main(void)
     test_new_screen_starts_blank();
     test_new_screen_reallocates();
     test_screen_erase();
+    test_screen_erase_uses_allocated_rows();
 
     test_line_number_width_off();
     test_line_number_width_digits();
