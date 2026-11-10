@@ -368,8 +368,11 @@ apply_undo_stack(struct editor *g, struct undo_object **from_stack,
 		*from_stack = undo_entry->prev;
 		free(undo_entry);
 
+		/* Plain u passes no to_stack: the inverse has nowhere to go. */
 		if (to_stack && inverse)
 			push_undo_entry(to_stack, inverse);
+		else
+			free(inverse);
 		first = 0;
 
 		if (dir < 0)
