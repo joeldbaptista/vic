@@ -7,10 +7,12 @@
  * run_dispatch and then check the buffer text or the captured message.
  *
  * buffer.c and undo.c are linked for real, so a transformation is also
- * checked by undoing it.  Eight symbols are stubbed: status_line (the
+ * checked by undoing it.  Nine symbols are stubbed: status_line (the
  * reporting commands have no other output), status_line_bold,
  * status_line_bold_errno, screen_erase, refresh, get_one_char,
- * reset_ydreg and showmatching.
+ * reset_ydreg, showmatching and colon_do_filter.  The last records what
+ * `:run pipe` hands it: the filtering itself lives in ex.c and is tested
+ * there, so here only the command line and range it builds are checked.
  *
  * The fixture sets every mark to -1, as the editor does on load: trimsel
  * reads MARK_LT and MARK_GT and falls back to the ex range only when they
@@ -18,6 +20,7 @@
  */
 #include "testutil.h"
 #include "run.h"
+#include "ex.h"
 #include "buffer.h"
 #include "pt.h"
 #include "text.h"
@@ -29,6 +32,9 @@
 static struct editor g;
 static char status_last[512];
 static int status_calls;
+static char filter_cmd[512];
+static int filter_rs, filter_re;
+static int filter_calls;
 
 void
 status_line(struct editor *x, const char *format, ...)
@@ -95,6 +101,16 @@ showmatching(struct editor *x, int p)
     (void)p;
 }
 
+void
+colon_do_filter(struct editor *x, int q, int r, const char *cmd)
+{
+    (void)x;
+    filter_calls++;
+    filter_rs = q;
+    filter_re = r;
+    snprintf(filter_cmd, sizeof(filter_cmd), "%s", cmd);
+}
+
 /* ---- fixture ------------------------------------------------------------- */
 
 static void
@@ -122,6 +138,10 @@ init(const char *content)
         g.mark[i] = -1;
     status_calls   = 0;
     status_last[0] = '\0';
+    filter_calls   = 0;
+    filter_rs      = -1;
+    filter_re      = -1;
+    filter_cmd[0]  = '\0';
 }
 
 static const char *
@@ -531,6 +551,55 @@ test_echo(void)
     CHECK(strcmp(dump(), "x\n") == 0);
 }
 
+/* ---- pipe ---------------------------------------------------------------- */
+
+static void
+test_pipe_no_command(void)
+{
+    run("x\n", "pipe", NULL, NULL);
+    CHECK(filter_calls == 0);
+    CHECK(strcmp(status_last, "pipe: no command given") == 0);
+}
+
+static void
+test_pipe_empty_range(void)
+{
+    char *argv[] = {"pipe", "cat"};
+
+    init("");
+    run_dispatch(&g, 2, argv, 0, -1);
+    CHECK(filter_calls == 0);
+    CHECK(strcmp(status_last, "pipe: empty range") == 0);
+}
+
+static void
+test_pipe_passes_range_and_command(void)
+{
+    /* Bare words reach the shell as written, so a bare '|' stays a
+     * pipeline. */
+    char *argv[] = {"pipe", "grep", "foo", "|", "sort"};
+
+    init("a\nfoo\nb\n");
+    run_dispatch(&g, 5, argv, 2, 5);
+    CHECK(filter_calls == 1);
+    CHECK(filter_rs == 2 && filter_re == 5);
+    CHECK(strcmp(filter_cmd, "grep foo | sort") == 0);
+}
+
+static void
+test_pipe_requotes_tokens(void)
+{
+    /* A token holding whitespace arrived quoted and is quoted again; a
+     * single quote inside it is written as '\''.  An empty token is
+     * quoted so it is not lost. */
+    char *argv[] = {"pipe", "jq", ".a | .b", "it's x", ""};
+
+    init("{}\n");
+    run_dispatch(&g, 5, argv, 0, text_len(&g) - 1);
+    CHECK(filter_calls == 1);
+    CHECK(strcmp(filter_cmd, "jq '.a | .b' 'it'\\''s x' ''") == 0);
+}
+
 static void
 test_echo_no_arguments(void)
 {
@@ -786,6 +855,10 @@ main(void)
 
     test_echo();
     test_echo_no_arguments();
+    test_pipe_no_command();
+    test_pipe_empty_range();
+    test_pipe_passes_range_and_command();
+    test_pipe_requotes_tokens();
     test_wc();
     test_wc_tabs_separate_words();
     test_col();
