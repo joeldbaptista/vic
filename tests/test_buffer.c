@@ -706,6 +706,36 @@ test_file_insert_missing(void)
     CHECK(status_calls == 0);
 }
 
+/* ---- init_text_buffer ---------------------------------------------------- */
+
+static void
+test_init_text_buffer_no_file(void)
+{
+    /* A bare vic and the startup scratch buffer pass no filename: the
+     * result is an empty buffer, quietly, as for a file not yet created.
+     * (That open() is not called with NULL is checked under valgrind.) */
+    init("old text\n");
+    CHECK(init_text_buffer(&g, NULL) == -1);
+    CHECK(strcmp(dump(), "\n") == 0);
+    CHECK(status_calls == 0);
+    CHECK(g.current_filename == NULL);
+}
+
+static void
+test_init_text_buffer_file(void)
+{
+    char path[64];
+
+    mkfile(path, sizeof(path), "abc\n");
+    init("old text\n");
+    CHECK(init_text_buffer(&g, path) == 4);
+    CHECK(strcmp(dump(), "abc\n") == 0);
+    CHECK(g.current_filename != NULL && strcmp(g.current_filename, path) == 0);
+    free(g.current_filename);
+    g.current_filename = NULL;
+    unlink(path);
+}
+
 static void
 test_file_insert_not_regular(void)
 {
@@ -877,6 +907,8 @@ main(void)
     test_file_insert();
     test_file_insert_clamps();
     test_file_insert_missing();
+    test_init_text_buffer_no_file();
+    test_init_text_buffer_file();
     test_file_insert_not_regular();
     test_file_insert_readonly();
 

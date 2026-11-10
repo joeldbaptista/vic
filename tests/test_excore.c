@@ -488,10 +488,18 @@ test_expand_escape(void)
     CHECK(strcmp(s, "ab\\") == 0);
     free(s);
 
-    /* An escaped backslash followed by '%' hits the same off-by-one as
-     * test_expand_adjacent: the '%' is stepped over unexpanded. */
+    /* An escaped backslash does not protect the '%' after it. */
     s = expand_args(&g, "\\\\%");
-    CHECK(strcmp(s, "\\%") == 0); /* should be "\\a.c" */
+    CHECK(strcmp(s, "\\file.c") == 0);
+    free(s);
+
+    /* The byte after an escaped character is still examined. */
+    s = expand_args(&g, "a\\%%");
+    CHECK(strcmp(s, "a%file.c") == 0);
+    free(s);
+
+    s = expand_args(&g, "\\x\\y");
+    CHECK(strcmp(s, "xy") == 0);
     free(s);
 }
 
@@ -520,21 +528,21 @@ test_expand_adjacent(void)
     init();
     g.current_filename = (char *)"a.c";
     g.alt_filename     = (char *)"b.c";
-    /*
-     * A byte immediately after an expansion is skipped, so a second
-     * metacharacter touching the first is left unexpanded.  The scan
-     * resumes at args + n + rlen and the loop's own s++ then steps one
-     * byte past it.  This is a pre-existing defect, present on main and
-     * unchanged by the piece-tree port, so the test pins what the code
-     * does rather than what it should do.
-     */
+    /* A metacharacter touching the previous expansion is expanded too. */
     s = expand_args(&g, "%#");
-    CHECK(strcmp(s, "a.c#") == 0); /* should be "a.cb.c" */
+    CHECK(strcmp(s, "a.cb.c") == 0);
     free(s);
 
     s = expand_args(&g, "%%");
-    CHECK(strcmp(s, "a.c%") == 0); /* should be "a.ca.c" */
+    CHECK(strcmp(s, "a.ca.c") == 0);
     free(s);
+
+    /* The inserted filename is not rescanned for metacharacters. */
+    g.current_filename = (char *)"50%";
+    s = expand_args(&g, "%");
+    CHECK(strcmp(s, "50%") == 0);
+    free(s);
+    g.current_filename = (char *)"a.c";
 
     /* With any byte in between, both expansions happen. */
     s = expand_args(&g, "% #");

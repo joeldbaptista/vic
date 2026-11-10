@@ -82,14 +82,16 @@ screen_erase(struct editor *g)
 	 * Sets the first byte of every row in g->screen to '\0'.  On the next
 	 * call to refresh(), every line will compare as changed and be redrawn.
 	 */
-	char *sp;
-	int li;
+	int off;
 
-	sp = g->screen;
-	for (li = 0; li < (int)g->rows; li++) {
-		sp[0] = '\0';
-		sp += g->screen_line_size;
-	}
+	/*
+	 * Walk the rows the buffer was allocated with, not g->rows: the two
+	 * agree only if new_screen was last called with g->rows.
+	 */
+	if (g->screen == NULL || g->screen_line_size <= 0)
+		return;
+	for (off = 0; off < g->screensize; off += g->screen_line_size)
+		g->screen[off] = '\0';
 }
 
 void

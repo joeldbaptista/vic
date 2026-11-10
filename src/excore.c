@@ -122,24 +122,31 @@ expand_args(struct editor *g, char *args)
 	 * corresponding filename is not set.  The caller is responsible for
 	 * free()ing the result.
 	 */
-	char *s;
+	char *s, *p;
 	const char *replace;
+	size_t i, rlen, tail;
 
+	/*
+	 * i is the index of the next byte to examine.  It is an index rather
+	 * than a pointer because args is reallocated on every expansion, and
+	 * each branch advances it exactly past what it consumed: one byte,
+	 * an escaped byte, or the inserted filename (which is not rescanned).
+	 */
 	args = xstrdup(args);
-	for (s = args; *s; s++) {
-		unsigned n;
-
+	i = 0;
+	while (args[i] != '\0') {
+		s = args + i;
+		if (*s == '\\' && s[1] != '\0') {
+			memmove(s, s + 1, strlen(s + 1) + 1);
+			i++;
+			continue;
+		}
 		if (*s == '%') {
 			replace = g->current_filename;
 		} else if (*s == '#') {
 			replace = g->alt_filename;
 		} else {
-			if (*s == '\\' && s[1] != '\0') {
-				char *t;
-				for (t = s; *t; t++)
-					*t = t[1];
-				s++;
-			}
+			i++;
 			continue;
 		}
 
@@ -149,18 +156,15 @@ expand_args(struct editor *g, char *args)
 			return NULL;
 		}
 
-		n = (unsigned)(s - args);
-		{
-			size_t rlen = strlen(replace);
-			size_t tail = strlen(s + 1);
-			char *p = xmalloc(n + rlen + tail + 1);
-			memcpy(p, args, n);
-			memcpy(p + n, replace, rlen);
-			memcpy(p + n + rlen, s + 1, tail + 1);
-			free(args);
-			args = p;
-			s = args + n + rlen;
-		}
+		rlen = strlen(replace);
+		tail = strlen(s + 1);
+		p = xmalloc(i + rlen + tail + 1);
+		memcpy(p, args, i);
+		memcpy(p + i, replace, rlen);
+		memcpy(p + i + rlen, s + 1, tail + 1);
+		free(args);
+		args = p;
+		i += rlen;
 	}
 
 	return args;

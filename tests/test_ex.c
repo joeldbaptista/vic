@@ -232,6 +232,8 @@ init(const char *content)
     free(g.last_search_pattern);
     for (i = 0; i < (int)(sizeof(g.reg) / sizeof(g.reg[0])); i++)
         free(g.reg[i]);
+    free(g.current_filename);
+    free(g.alt_filename);
     memset(&g, 0, sizeof(g));
     g.pt                          = ptnew(copy, n);
     g.tabstop                     = 8;
@@ -705,6 +707,7 @@ test_set_needs_two_letters(void)
      * 'se'.  With no pattern the substitute reports rather than acting. */
     ex("s");
     CHECK(strcmp(dump(), "foo\n") == 0);
+    CHECK(said("missing delimiters"));
 }
 
 /* ---- :mark -------------------------------------------------------------- */
