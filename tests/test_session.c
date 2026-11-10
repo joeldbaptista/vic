@@ -140,12 +140,25 @@ showmatching(struct editor *x, int p)
 
 /* ---- fixture ------------------------------------------------------------- */
 
+/* Free everything the editor owns and zero it, so no test leaks into the
+ * next or leaves memory behind under valgrind. */
+static void
+release(void)
+{
+    int i;
+
+    ptfree(g.pt);
+    free(g.last_search_pattern);
+    for (i = 0; i < g.initial_cmdc; i++)
+        free(g.initial_cmdv[i]);
+    free(g.initial_cmdv);
+    memset(&g, 0, sizeof(g));
+}
+
 static void
 init(void)
 {
-    ptfree(g.pt);
-    free(g.last_search_pattern);
-    memset(&g, 0, sizeof(g));
+    release();
     g.pt               = ptnew(NULL, 0);
     g.tabstop          = 8;
     g.undo_queue_state = UNDO_EMPTY;
@@ -516,7 +529,7 @@ test_init_globals(void)
 {
     int i;
 
-    memset(&g, 0, sizeof(g));
+    release();
     init_globals(&g);
 
     /* The compile-time defaults are seeded from config.h. */

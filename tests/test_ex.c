@@ -232,6 +232,8 @@ init(const char *content)
     free(g.last_search_pattern);
     for (i = 0; i < (int)(sizeof(g.reg) / sizeof(g.reg[0])); i++)
         free(g.reg[i]);
+    free(g.current_filename);
+    free(g.alt_filename);
     memset(&g, 0, sizeof(g));
     g.pt                          = ptnew(copy, n);
     g.tabstop                     = 8;
