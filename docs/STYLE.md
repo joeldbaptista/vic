@@ -54,9 +54,22 @@ if (foo) {
 }
 ```
 
-4. White spaces
+4. White spaces and comments
 
 Use tabs instead of spaces to index code.
+
+Write comments at the top of the module, and at the beginning of a function explaining
+what the function does, its arguments, and any observation you think important that the 
+client of the function must to know. 
+
+Comments in the body of functions must state the why rather than the how. So if the
+reason for a particular section of the code is not clear, consider leaving a comment.
+Also unusual expression should probably take a comment, the reader will likely ask
+why is this.
+
+In the comments, leave double comments after the period, as this helps the reader to
+easily parse complete ideas; and use backticks when referencing variables. For example,
+"`times` must be larger than 1", rather than "times must be larger than 1". 
 
 5. Variables
 
